@@ -69,20 +69,19 @@ Transform photos into AI-generated artwork with intelligent style selection.
 #### **Slideshow Experience**
 - ✅ Seamless auto-rotation while new images are generating
 - ✅ Background processing while viewing current image
-- ✅ Natural pacing based on generation time, or 5-second cycles when generation is paused
-- ✅ Stop/Start Image Generation toggle to protect API quota without stopping the show
+- ✅ Natural pacing based on generation time, or timed cycles when generation is paused
+- ✅ Play/pause and speed controls for the curated slideshow (default 8s)
 - ✅ Footer shows next image progress:
   - "Next Image: Analysing..."
   - "Next Image: Creating image prompt..."
   - "Next Image: Generating image..."
 
 #### **History & Navigation**
-- ✅ Left filmstrip showing last 10 images with thumbnails
+- ✅ Left filmstrip showing the latest 200 images with thumbnails
 - ✅ Click any thumbnail to revisit with full metadata
-- ✅ Auto-managed storage (keeps last 10, deletes oldest)
+- ✅ Auto-managed storage (keeps last 200, deletes oldest)
 - ✅ Saves to `photos/generated/`
 
-#### **UI/UX Polish**
 - ✅ Minimalist full-screen design
 - ✅ Right panel: Analysis + Image Prompt display
 - ✅ Toggle between original and generated
@@ -90,6 +89,7 @@ Transform photos into AI-generated artwork with intelligent style selection.
 - ✅ Active thumbnail highlighting
 - ✅ Smooth transitions and loading states
 - ✅ Prompt details popup with scrollable template + generation sections (no slider fuss)
+- ✅ Admin settings gear (password `football`) gates image generation controls
 
 ### Technical Implementation
 
@@ -99,7 +99,7 @@ GET  /api/photos/random          # Random photo
 POST /api/analyze                # Gemini vision analysis  
 POST /api/prompt                 # AI style prompt generation
 POST /api/generate               # Image generation
-GET  /api/generated/history      # Last 10 images metadata
+GET  /api/generated/history      # Last 200 images metadata
 GET  /api/generated/{filename}   # Serve generated image
 ```
 
@@ -135,21 +135,20 @@ GET  /api/generated/{filename}   # Serve generated image
 
 ---
 
-## Phase 4: GitHub Release & Deployment Prep 🎯 **NEXT**
+## Phase 4: Hosted Family Slideshow 🎯 **COMPLETE**
 
 ### Goal
-Publish the project to GitHub and package a curated `/photos` set that travels with every deployment.
+Deliver a hosted, view-only slideshow experience backed by curated generated art, while keeping image generation under admin control.
 
-### What We'll Do
-- [ ] Publish the repo to GitHub (scrub secrets, add badges)
-- [ ] Document the curated photo set (sources, licensing, how to swap personal images)
-- [ ] Add a seeding script so deployments copy the curated set on first boot
-- [ ] Smoke-test the app from a clean clone using the new documentation
+### What We Did
+- [x] Ship hosted defaults: slideshow loads in view-only mode, generation disabled by default, footer controls hidden.
+- [x] Add admin unlock workflow (password gate + start generation button) for controlled API usage.
+- [x] Expose slideshow playback controls (play/pause + 3–30s speed selector, default 8s).
+- [x] Track/deploy curated `photos/` + `photos/generated/` bundle so family sees finished art immediately.
+- [x] Auto-prune missing generated images and show a clean loading state for thumbnails.
 
-**Milestone:** GitHub repo live with a ready-to-deploy bundle, no manual photo wrangling required.
-
+**Milestone:** Hosted URL shows an immediately-available slideshow; admin can selectively enable generation when desired.
 ---
-
 ## Phase 5: Public Deployment 🎯
 
 ### Goal
@@ -234,17 +233,18 @@ Better history management and user controls.
 - **Phase 0:** Local slideshow
 - **Phase 1-2:** Development foundation
 - **Phase 3:** AI generation with context-aware styles ⭐ **MAJOR MILESTONE**
+- **Phase 4:** Hosted family slideshow (view-only defaults + admin controls)
 
 ### 🎯 Next Up
-- **Phase 4:** GitHub release & deployment prep (curated `/photos` bundle)
 - **Phase 5:** Public deployment (host curated gallery for family)
 
 ### What's Working Right Now
 - AI-powered slideshow with intelligent style selection
 - Background processing for seamless experience
-- History filmstrip with last 10 images
+- History filmstrip with latest 200 images
 - Context-aware prompts (Halloween → spooky, celebration → vibrant, etc.)
-- Stop/Start image generation toggle (slideshow keeps moving on history)
+- Hosted slideshow defaults to view-only mode; admin enables generation via password
+- Auto-pruning keeps history clean after manual file deletions; thumbnails only appear once loaded
 - Full metadata display
 - Original vs generated comparison
 - Automatic local storage management

@@ -10,21 +10,25 @@ A web application that transforms your personal photos into AI-generated artwork
 
 Then open `http://localhost:5173` in your browser!
 
+**Repository:** Published at [dtaylor113/ai-slideshow](https://github.com/dtaylor113/ai-slideshow)
+
 **Requirements:**
 - Python 3.10+
 - Node.js 18+
 - Gemini API key (free tier works great!)
 
-## Current Status: Phase 3 - AI Image Generation ✅
+## Current Status: Phase 4 - Hosted Family Slideshow ✅
 
 **What's Working:**
-- ✅ Auto-rotating AI-generated artwork slideshow
+- ✅ Auto-rotating gallery of curated AI artwork (latest 200 images ready instantly)
 - ✅ Context-aware style selection (Gemini analyzes each photo and chooses fitting art styles)
 - ✅ Seamless background processing (next image generates while you view current one)
-- ✅ History filmstrip showing last 10 generated images
+- ✅ History filmstrip showing the latest 200 generated images
 - ✅ Click any history thumbnail to revisit with full metadata
 - ✅ Hover preview shows generated art alongside the original photo
-- ✅ Footer control to stop/start image generation (slideshow keeps cycling through history when stopped)
+- ✅ Slideshow playback controls (play/pause + 3–30s speed selector)
+- ✅ Admin-only image generation controls (settings gear → password `football`)
+- ✅ Auto-pruning keeps history clean; filmstrip waits for thumbnails before displaying
 - ✅ View original vs generated image toggle
 - ✅ FREE Google Gemini AI (vision + image generation)
 
@@ -52,20 +56,29 @@ Then open `http://localhost:5173` in your browser!
 - **Image optimization:** Resizes for faster processing (800px analysis, 1024px generation)
 
 ### 🎬 Slideshow & History
+- **View-only by default:** Hosted build loads with a pre-generated gallery so family can watch immediately
+- **Playback controls:** Play/pause toggle plus 3–30s speed selector (default 8 seconds)
 - **Auto-rotation:** Seamless transitions when next image is ready
-- **Adaptive pacing:** Natural flow based on generation time, or 5-second cycles when running through saved history only
-- **Filmstrip sidebar:** Last 10 generated images with thumbnails
+- **Adaptive pacing:** Natural flow based on generation time, or timed cycling when running through saved history only
+- **Filmstrip sidebar:** Scrollable view of the latest 200 generated images with thumbnails
 - **Click to revisit:** View any past image with its analysis and prompt
-- **Stop image generation:** Toggle API calls off while continuing to rotate through existing artwork
+- **Admin start/stop:** Settings gear (password `football`) reveals generation controls when you want fresh AI renders
 - **Saved locally:** Generated images stored in `photos/generated/`
 
 ### 📊 UI/UX
 - **Minimalist design:** Full-screen image display with discreet controls
 - **Right panel:** Analysis text and image prompt displayed elegantly
-- **Background status:** Footer shows next image progress ("Analysing...", "Creating image prompt...", "Generating image..." or "Paused")
+- **Background status:** Footer shows next image progress once admin enables generation
 - **Hover previews:** Thumbnail hover reveals generated art next to the source photo
 - **Toggle original:** Button to compare original photo vs generated artwork
 - **Responsive:** Works on desktop and tablet
+
+## Hosted Mode Defaults
+- The slideshow starts in view-only mode, serving curated artwork from `photos/generated/` with no waiting.
+- A settings gear in the footer unlocks admin mode (password `football`) to start or stop new AI generations.
+- Playback controls let viewers pause/resume the slideshow and choose a speed between 3 and 30 seconds (default 8s).
+- History refreshes automatically every three minutes so all open browsers see the latest creations once generation is running.
+- Missing thumbnails/originals are pruned automatically; the filmstrip shows “Loading thumbnails…” until content is ready.
 
 ## Project Structure
 
@@ -76,7 +89,7 @@ ai-slideshow/
 │   └── requirements.txt     # Python deps (FastAPI, Gemini, Pillow)
 ├── photos/
 │   ├── *.jpg                # 📸 Your source photos
-│   └── generated/           # 🎨 AI-generated images (auto-managed, keeps last 10)
+│   └── generated/           # 🎨 Curated AI artwork (committed); auto-managed to keep the latest 200 when generation runs
 ├── src/
 │   ├── components/
 │   │   ├── PhotoViewer.tsx  # Main slideshow component
@@ -153,7 +166,7 @@ cp ~/Pictures/vacation/*.jpg photos/
 | `/api/analyze` | POST | Analyze image with Gemini Vision |
 | `/api/prompt` | POST | Generate art style prompt from analysis |
 | `/api/generate` | POST | Generate styled image with Nano Banana |
-| `/api/generated/history` | GET | Get last 10 generated images metadata |
+| `/api/generated/history` | GET | Get last 200 generated images metadata |
 | `/api/generated/{filename}` | GET | Serve a specific generated image |
 
 ## Tech Stack
@@ -204,7 +217,7 @@ cd backend && python main.py  # Backend
 See **[ROADMAP.md](./ROADMAP.md)** for the complete development plan.
 
 **Upcoming phases:**
-- **Phase 4:** Publish the repo to GitHub and package a curated `/photos` set for deployment
+- ✅ **Phase 4:** Hosted family slideshow (view-only defaults + admin controls)
 - **Phase 5:** Public hosting for family sharing (Railway, Fly.io) using the curated library
 - **Phase 6:** Enhanced history (search, favorites, share)
 - **Phase 7:** Custom style presets and user controls
@@ -215,7 +228,8 @@ This project follows an **iterative, vibe-coding approach**:
 1. ✅ **Phase 0:** Basic local slideshow (DONE!)
 2. ✅ **Phase 1-2:** Development tooling and baseline (DONE!)
 3. ✅ **Phase 3:** AI generation with context-aware styles (DONE!)
-4. 🎯 **Phase 4+:** GitHub release, curated photo bundle, and deployment
+4. ✅ **Phase 4:** Hosted family slideshow (view-only defaults + admin controls)
+5. 🎯 **Phase 5+:** Public hosting, enhanced history, custom controls
 
 Start simple, add complexity only when needed!
 

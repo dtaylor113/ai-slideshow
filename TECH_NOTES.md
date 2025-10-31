@@ -4,8 +4,9 @@
 
 **Type:** Full-stack AI-powered web application  
 **Purpose:** Digital frame that transforms photos into AI-generated artwork  
-**Current Phase:** Phase 3 - AI Image Generation with Context-Aware Styles (Complete)  
-**Deployment Model:** Local development (cloud deployment planned for Phase 4-5)
+**Repository:** https://github.com/dtaylor113/ai-slideshow  
+**Current Phase:** Phase 4 - Hosted Family Slideshow (view-only defaults + admin controls)  
+**Deployment Model:** Local development + hosted Railway deployment (Phase 5 will expand hosting automation)
 
 ---
 
@@ -24,7 +25,7 @@
                                │  photos/            │
                                │  ├─ source images   │
                                │  └─ generated/      │
-                               │     (last 10)       │
+                               │     (last 200)      │
                                └─────────────────────┘
 ```
 
@@ -84,7 +85,7 @@ ai-slideshow/
 ├── 📸 Photos & Generated Art
 │   └── photos/
 │       ├── *.jpg, *.png, etc.    # Curated source photos bundled for deployment (gitignored locally)
-│       └── generated/            # AI-generated images (auto-managed)
+│       └── generated/            # Committed AI artwork bundle; auto-managed cap of latest 200 when generation runs
 │           └── gen_*.png         # Timestamped generated files
 │
 ├── 🛠️ Scripts
@@ -176,12 +177,12 @@ ai-slideshow/
 | `POST /api/analyze` | POST | Gemini vision analysis |
 | `POST /api/prompt` | POST | AI-generated art style prompt |
 | `POST /api/generate` | POST | Generate styled image |
-| `GET /api/generated/history` | GET | Last 10 generated images |
+| `GET /api/generated/history` | GET | Last 200 generated images |
 | `GET /api/generated/{filename}` | GET | Serve specific generated image |
 
 **Key Data Structures:**
 ```python
-# In-memory history (last 10 generated images)
+# In-memory history (last 200 generated images)
 generated_history = []
 MAX_HISTORY = 10
 
@@ -227,7 +228,7 @@ timestamp = int(time.time() * 1000)
 filename = f"gen_{timestamp}_{original_name}.png"
 save_to(GENERATED_DIR / filename)
 
-# 5. Manage history (keep last 10)
+# 5. Manage history (keep last 200)
 if len(generated_history) > MAX_HISTORY:
     remove_oldest()
 
@@ -347,8 +348,8 @@ viewHistoryImage(entry, { fromAutoCycle = false }) {
 
 // API usage guardrail
 toggleGeneration() {
-  1. Pause: flip generationPaused, clear footer stage, keep slideshow cycling history every 5s
-  2. Resume: restart the background pipeline if idle and stage === 'complete'
+  1. Pause: flip generationPaused, clear footer stage, slideshow keeps cycling at the user-selected interval
+  2. Resume: restart the background pipeline (fetchAndProcessPhoto) if idle and stage === 'complete'
 }
 ```
 
@@ -369,18 +370,19 @@ toggleGeneration() {
 │ │  🎨      │ │                        │ │ IMAGE PROMPT   │ │
 │ │  🎨      │ │                        │ │                │ │
 │ │  🎨      │ │                        │ │ "in the style  │ │
-│ │  (10max) │ │                        │ │  of..."        │ │
+│ │ (200)    │ │                        │ │  of..."        │ │
 │ │          │ │                        │ │                │ │
 │ └──────────┘ └────────────────────────┘ └────────────────┘ │
 │──────────────────────────────────────────────────────────────│
-│  [Stop/Start Image Generation]   Next Image: Generating...   │
+│  Play/Pause · Speed (3–30s)   ⚙ Admin Start/Stop Image Gen   │
+│                              Next Image: Generating...       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 **Key UI Elements:**
 
 1. **Filmstrip (Left, 100px)**
-   - Last 10 generated images
+   - Latest 200 generated images
    - Thumbnail previews (actual images loaded)
    - Active item highlighted (blue border)
    - Vertical scroll if needed
@@ -401,10 +403,10 @@ toggleGeneration() {
    - Dark background (#1a1a1a)
 
 4. **Footer (Bottom, fixed)**
-   - Persistent control to stop/start background image generation
-   - Status label reflects active stage or "Paused"
-   - Semi-transparent black overlay
-   - Minimal and discreet
+   - Play/pause toggle plus speed selector (3–30s, default 8s)
+   - Settings gear (password `football`) reveals admin-only generation controls
+   - Status label reflects active stage once generation is enabled
+   - Semi-transparent black overlay, minimal and discreet
 
 5. **Thumbnail hover preview**
    - Hovering a history item reveals generated art alongside the original photo
@@ -415,6 +417,13 @@ toggleGeneration() {
    - Two evenly split, scrollable sections: **Image Prompt Template** (top) and **Image Generation Prompt** (bottom).
    - Displays the exact text sent to Gemini for both prompt construction and image generation, aiding transparency.
    - Updated prompt authoring yields 20–35 word, highly descriptive style prompts for richer generations.
+
+### Admin Mode
+
+- Slideshow loads with image generation paused so the hosted gallery appears instantly.
+- Footer settings gear unlocks admin mode with password `football`, persisted for the current browser session.
+- When admin starts generation, the UI calls `fetchAndProcessPhoto()` to resume the pipeline and reveals status controls.
+- Every client polls `/api/generated/history` every 3 minutes, ensuring all viewers see fresh artwork once generation restarts.
 
 ### Color Scheme
 

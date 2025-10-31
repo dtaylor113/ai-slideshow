@@ -22,7 +22,6 @@ venv/
 .vscode/
 
 # Personal data & generated media (keep curated originals committed)
-photos/generated/
 .icloud/
 
 # Logs created during experimentation

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import type { MouseEvent as ReactMouseEvent, FormEvent, ChangeEvent } from 'react'
 import { iCloudAPI, Photo, AnalyzeResponse, HistoryEntry } from '../services/api'
 import './PhotoViewer.css'
 
@@ -389,7 +389,10 @@ const buildGenerationPrompt = (description: string, stylePrompt: string): string
   return enhanced
 }
 
-const GENERATION_PAUSE_CYCLE_MS = 5000
+const DEFAULT_SLIDESHOW_INTERVAL_MS = 8000
+const HISTORY_REFRESH_INTERVAL_MS = 180000
+const SLIDESHOW_SPEED_OPTIONS = [3000, 5000, 8000, 12000, 20000, 30000]
+const ADMIN_PASSWORD = 'football'
 
 function PhotoViewer() {
   const [currentPhoto, setCurrentPhoto] = useState<Photo | null>(null)
@@ -420,22 +423,40 @@ function PhotoViewer() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyThumbnails, setHistoryThumbnails] = useState<Record<string, string>>({})
   const [historyOriginalPhotos, setHistoryOriginalPhotos] = useState<Record<string, Photo>>({})
-  const [generationPaused, setGenerationPaused] = useState(false)
+  const [generationPaused, setGenerationPaused] = useState(true)
+  const [slideshowPlaying, setSlideshowPlaying] = useState(true)
+  const [slideshowSpeedMs, setSlideshowSpeedMs] = useState(DEFAULT_SLIDESHOW_INTERVAL_MS)
+  const [thumbnailsLoading, setThumbnailsLoading] = useState(true)
+  const [missingOriginal, setMissingOriginal] = useState(false)
+  const [adminVerified, setAdminVerified] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [showAdminDialog, setShowAdminDialog] = useState(false)
+  const [adminPasswordInput, setAdminPasswordInput] = useState('')
+  const [adminError, setAdminError] = useState('')
 
   // Prevent duplicate initialization in React StrictMode
-  const initialized = useRef(false)
   const processing = useRef(false)
   const backgroundProcessing = useRef(false)
   const filmstripResizeActive = useRef(false)
   const filmstripResizeData = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: filmstripWidth })
   const viewerRef = useRef<HTMLDivElement>(null)
   const historyOriginalRequests = useRef(new Set<string>())
-  const generationPausedRef = useRef(generationPaused)
+  const generationPausedRef = useRef(true)
+  const generatedIdRef = useRef<string | null>(generatedId)
+  const historyThumbnailsRef = useRef<Record<string, string>>(historyThumbnails)
   const cycleTimerRef = useRef<number | null>(null)
  
   useEffect(() => {
     generationPausedRef.current = generationPaused
   }, [generationPaused])
+
+  useEffect(() => {
+    generatedIdRef.current = generatedId
+  }, [generatedId])
+
+  useEffect(() => {
+    historyThumbnailsRef.current = historyThumbnails
+  }, [historyThumbnails])
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -530,6 +551,48 @@ function PhotoViewer() {
     setHoverPreview(null)
   }
 
+  const openAdminDialog = () => {
+    setAdminError('')
+    setAdminPasswordInput('')
+    setShowAdminDialog(true)
+  }
+
+  const closeAdminDialog = () => {
+    setShowAdminDialog(false)
+    setAdminPasswordInput('')
+    setAdminError('')
+  }
+
+  const handleAdminPasswordSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (adminPasswordInput.trim().toLowerCase() === ADMIN_PASSWORD) {
+      setAdminVerified(true)
+      setAdminError('')
+      setAdminPasswordInput('')
+    } else {
+      setAdminError('Incorrect password. Please try again.')
+    }
+  }
+
+  const handleAdminAction = () => {
+    if (!adminVerified) {
+      return
+    }
+
+    if (!isAdmin) {
+      setIsAdmin(true)
+    }
+
+    if (generationPausedRef.current) {
+      resumeGeneration()
+      fetchAndProcessPhoto()
+    } else {
+      pauseGeneration()
+    }
+
+    closeAdminDialog()
+  }
+
   const applyBackgroundResult = (result: BackgroundResult) => {
     setError('')
     setHoverPreview(null)
@@ -617,21 +680,35 @@ function PhotoViewer() {
     }
   }
 
-  const fetchHistory = async () => {
-    try {
-      const historyData = await iCloudAPI.getGeneratedHistory()
-      setHistory(historyData.history)
-      
-      // Load thumbnails for all history items
-      loadHistoryThumbnails(historyData.history)
-    } catch (err) {
-      console.error('Failed to fetch history:', err)
-    }
-  }
+  const removeHistoryEntry = useCallback((id: string) => {
+    historyOriginalRequests.current.delete(id)
+    setHistory((prev) => prev.filter((entry) => entry.id !== id))
+    setHistoryThumbnails((prev) => {
+      if (!(id in prev)) return prev
+      const { [id]: _removed, ...rest } = prev
+      return rest
+    })
+    setHistoryOriginalPhotos((prev) => {
+      if (!(id in prev)) return prev
+      const { [id]: _removed, ...rest } = prev
+      return rest
+    })
+    setGeneratedId((prev) => (prev === id ? null : prev))
 
-  const loadHistoryThumbnails = async (entries: HistoryEntry[]) => {
-    const thumbnails: Record<string, string> = { ...historyThumbnails }
-    const missing = entries.filter((entry) => !thumbnails[entry.id])
+    if (generatedIdRef.current === id) {
+      generatedIdRef.current = null
+      setGeneratedImage(null)
+      setAnalysis(null)
+      setArtPrompt(null)
+      setPromptTemplate(null)
+      setGenerationPrompt(null)
+      setShowOriginal(false)
+      setCurrentPhoto(null)
+    }
+  }, [])
+
+  const loadHistoryThumbnails = useCallback(async (entries: HistoryEntry[]) => {
+    const missing = entries.filter((entry) => !historyThumbnailsRef.current[entry.id])
     const concurrency = 10
 
     for (let i = 0; i < missing.length; i += concurrency) {
@@ -640,16 +717,30 @@ function PhotoViewer() {
         batch.map(async (entry) => {
           try {
             const imageData = await iCloudAPI.getGeneratedImage(entry.filename)
-            thumbnails[entry.id] = imageData.data
+            setHistoryThumbnails((prev) => ({ ...prev, [entry.id]: imageData.data }))
           } catch (err) {
             console.error(`Failed to load thumbnail for ${entry.filename}:`, err)
+            removeHistoryEntry(entry.id)
           }
         })
       )
     }
+  }, [removeHistoryEntry])
 
-    setHistoryThumbnails(thumbnails)
-  }
+  const fetchHistory = useCallback(async () => {
+    try {
+      setThumbnailsLoading(true)
+      const historyData = await iCloudAPI.getGeneratedHistory()
+      setHistory(historyData.history)
+      
+      // Load thumbnails for all history items
+      await loadHistoryThumbnails(historyData.history)
+    } catch (err) {
+      console.error('Failed to fetch history:', err)
+    } finally {
+      setThumbnailsLoading(false)
+    }
+  }, [loadHistoryThumbnails])
 
   const viewHistoryImage = useCallback(async (entry: HistoryEntry, options?: { fromAutoCycle?: boolean }) => {
     const fromAutoCycle = options?.fromAutoCycle ?? false
@@ -675,17 +766,21 @@ function PhotoViewer() {
       setGenerationPrompt(entry.generation_prompt || null)
       setStage('complete')
       setShowOriginal(false)
+      setMissingOriginal(false)
 
       // Display cached generated image instantly if available
-      if (historyThumbnails[entry.id]) {
-        setGeneratedImage(historyThumbnails[entry.id])
+      if (historyThumbnailsRef.current[entry.id]) {
+        setGeneratedImage(historyThumbnailsRef.current[entry.id])
       } else {
-        iCloudAPI.getGeneratedImage(entry.filename)
-          .then((imageData) => setGeneratedImage(imageData.data))
-          .catch((imgErr) => {
-            console.error('Failed to load history image:', imgErr)
-            setError('Failed to load history image')
-          })
+        try {
+          const imageData = await iCloudAPI.getGeneratedImage(entry.filename)
+          setHistoryThumbnails((prev) => ({ ...prev, [entry.id]: imageData.data }))
+          setGeneratedImage(imageData.data)
+        } catch (imgErr) {
+          console.error('Failed to load history image:', imgErr)
+          removeHistoryEntry(entry.id)
+          return
+        }
       }
 
       // Fetch the original photo asynchronously (for toggle)
@@ -696,21 +791,21 @@ function PhotoViewer() {
         if (!fromAutoCycle) {
           console.log(`📸 Fetching original photo: ${entry.original_filename}`)
         }
-        iCloudAPI.getPhotoByFilename(entry.original_filename)
-          .then((originalPhoto) => {
-            setCurrentPhoto(originalPhoto)
-            setHistoryOriginalPhotos((prev) => ({ ...prev, [entry.id]: originalPhoto }))
-          })
-          .catch((photoErr) => {
-            console.error('Failed to load original photo:', photoErr)
-            setError('Failed to load original photo')
-          })
+        try {
+          const originalPhoto = await iCloudAPI.getPhotoByFilename(entry.original_filename)
+          setCurrentPhoto(originalPhoto)
+          setHistoryOriginalPhotos((prev) => ({ ...prev, [entry.id]: originalPhoto }))
+          setMissingOriginal(false)
+        } catch (photoErr) {
+          console.error('Failed to load original photo:', photoErr)
+          setMissingOriginal(true)
+        }
       }
     } catch (err) {
       console.error('Failed to load history entry:', err)
       setError('Failed to load history image')
     }
-  }, [historyOriginalPhotos, historyThumbnails])
+  }, [historyOriginalPhotos, removeHistoryEntry])
 
   useEffect(() => {
     const clearTimer = () => {
@@ -722,22 +817,22 @@ function PhotoViewer() {
 
     clearTimer()
 
-    if (!generationPaused || history.length <= 1) {
+    if (!slideshowPlaying || history.length === 0) {
       return clearTimer
     }
 
     cycleTimerRef.current = window.setTimeout(() => {
-      const currentIndex = history.findIndex((entry) => entry.id === generatedId)
-      const nextIndex = currentIndex === -1 || currentIndex === history.length - 1 ? 0 : currentIndex + 1
-      const nextEntry = history[nextIndex]
+      const pool = history.filter((entry) => entry.id !== generatedId)
+      const candidates = pool.length > 0 ? pool : history
+      const nextEntry = candidates[Math.floor(Math.random() * candidates.length)]
 
       if (nextEntry) {
         void viewHistoryImage(nextEntry, { fromAutoCycle: true })
       }
-    }, GENERATION_PAUSE_CYCLE_MS)
+    }, slideshowSpeedMs)
 
     return clearTimer
-  }, [generationPaused, history, generatedId, viewHistoryImage])
+  }, [slideshowPlaying, history, generatedId, viewHistoryImage, slideshowSpeedMs])
 
   const pauseGeneration = () => {
     if (generationPausedRef.current) return
@@ -765,8 +860,18 @@ function PhotoViewer() {
   }
 
   const toggleGeneration = () => {
-    if (generationPausedRef.current) {
+    if (!isAdmin) {
+      openAdminDialog()
+      return
+    }
+
+    const wasPaused = generationPausedRef.current
+
+    if (wasPaused) {
       resumeGeneration()
+      if (!processing.current && !backgroundProcessing.current) {
+        fetchAndProcessPhoto()
+      }
     } else {
       pauseGeneration()
     }
@@ -878,14 +983,6 @@ function PhotoViewer() {
     }
   }
 
-  // Auto-fetch on mount - only once!
-  useEffect(() => {
-    if (!initialized.current) {
-      initialized.current = true
-      fetchAndProcessPhoto()
-    }
-  }, [])
-
   // Start background processing when current image is complete
   useEffect(() => {
     if (stage === 'complete' && !backgroundProcessing.current && !generationPaused) {
@@ -894,10 +991,32 @@ function PhotoViewer() {
     }
   }, [stage, generationPaused])
 
+  const fetchHistoryRef = useRef(fetchHistory)
+
+  useEffect(() => {
+    fetchHistoryRef.current = fetchHistory
+  }, [fetchHistory])
+
   // Fetch history on mount
   useEffect(() => {
     fetchHistory()
+  }, [fetchHistory])
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      fetchHistoryRef.current()
+    }, HISTORY_REFRESH_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
   }, [])
+
+  useEffect(() => {
+    if (history.length > 0 && !generatedId) {
+      void viewHistoryImage(history[0], { fromAutoCycle: true })
+    }
+  }, [history, generatedId, viewHistoryImage])
 
   // Determine which image to show
   const displayImage = showOriginal 
@@ -962,33 +1081,99 @@ function PhotoViewer() {
         </div>
       )}
 
+      {showAdminDialog && (
+        <div className="admin-modal" role="dialog" aria-modal="true">
+          <div className="admin-modal-content">
+            <div className="admin-modal-header">
+              <h4>Admin Controls</h4>
+              <button
+                className="admin-modal-close"
+                onClick={closeAdminDialog}
+                aria-label="Close admin controls"
+              >
+                ✕
+              </button>
+            </div>
+            {adminVerified ? (
+              <div className="admin-modal-body">
+                <p className="admin-modal-text">
+                  {generationPaused
+                    ? 'Start image generation when you are ready.'
+                    : 'Image generation is currently running.'}
+                </p>
+                <button
+                  type="button"
+                  className="admin-modal-primary"
+                  onClick={handleAdminAction}
+                >
+                  {generationPaused ? 'Start Image Generation' : 'Stop Image Generation'}
+                </button>
+                <p className="admin-modal-hint">
+                  Generation controls appear in the footer while admin mode is active.
+                </p>
+              </div>
+            ) : (
+              <form className="admin-modal-body" onSubmit={handleAdminPasswordSubmit}>
+                <label htmlFor="admin-password" className="admin-modal-label">
+                  Admin Password
+                </label>
+                <input
+                  id="admin-password"
+                  type="password"
+                  className="admin-modal-input"
+                  value={adminPasswordInput}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setAdminPasswordInput(event.target.value)}
+                  autoFocus
+                />
+                {adminError && <p className="admin-modal-error">{adminError}</p>}
+                <div className="admin-modal-actions">
+                  <button type="submit" className="admin-modal-primary">
+                    Unlock
+                  </button>
+                  <button type="button" className="admin-modal-secondary" onClick={closeAdminDialog}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Filmstrip - left sidebar with history */}
-      {history.length > 0 && (
+      {(history.length > 0 || thumbnailsLoading) && (
         <>
           <div className="filmstrip" style={{ width: filmstripWidth }}>
             <h3 className="filmstrip-title">Recent</h3>
-            <div className="filmstrip-scroll">
-              {history.map((entry) => (
-                <div
-                  key={entry.id}
-                  className={`filmstrip-item ${entry.id === generatedId ? 'active' : ''}`}
-                  onClick={() => viewHistoryImage(entry)}
-                  onMouseEnter={(event) => handleThumbnailEnter(event, entry)}
-                  onMouseLeave={handleThumbnailLeave}
-                  title={entry.prompt}
-                >
-                  <div className="filmstrip-thumbnail">
-                    {historyThumbnails[entry.id] ? (
-                      <img src={historyThumbnails[entry.id]} alt={entry.prompt} />
-                    ) : (
-                      <div className="filmstrip-placeholder">
-                        <span>🎨</span>
-                      </div>
-                    )}
+            {thumbnailsLoading ? (
+              <div className="filmstrip-loading" aria-live="polite">
+                <div className="spinner small"></div>
+                <span>Loading thumbnails…</span>
+              </div>
+            ) : (
+              <div className="filmstrip-scroll">
+                {history.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`filmstrip-item ${entry.id === generatedId ? 'active' : ''}`}
+                    onClick={() => viewHistoryImage(entry)}
+                    onMouseEnter={(event) => handleThumbnailEnter(event, entry)}
+                    onMouseLeave={handleThumbnailLeave}
+                    title={entry.prompt}
+                  >
+                    <div className="filmstrip-thumbnail">
+                      {historyThumbnailsRef.current[entry.id] ? (
+                        <img src={historyThumbnailsRef.current[entry.id]} alt={entry.prompt} />
+                      ) : (
+                        <div className="filmstrip-placeholder">
+                          <span>🎨</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
           <div
             className="filmstrip-resizer"
@@ -1051,7 +1236,19 @@ function PhotoViewer() {
           {generatedImage && stage === 'complete' && (
             <button 
               className="toggle-button"
-              onClick={() => setShowOriginal(!showOriginal)}
+              onClick={() => {
+                if (!showOriginal) {
+                  if (missingOriginal) {
+                    setError('Original photo unavailable for this entry')
+                    return
+                  }
+                  setError('')
+                  setShowOriginal(true)
+                } else {
+                  setError('')
+                  setShowOriginal(false)
+                }
+              }}
               title={showOriginal ? 'Show generated' : 'Show original'}
             >
               {showOriginal ? '🎨' : '📸'}
@@ -1120,26 +1317,66 @@ function PhotoViewer() {
 
       {/* Background Processing Footer */}
       <div className="background-status-footer">
-        <button
-          className={`generation-toggle-button ${generationPaused ? 'paused' : ''}`}
-          onClick={toggleGeneration}
-          title={generationPaused ? 'Start image generation' : 'Stop image generation'}
-          aria-pressed={generationPaused}
-        >
-          {generationPaused ? 'Start Image Generation' : 'Stop Image Generation'}
-        </button>
-        <span className="background-status-label">Next Image:</span>
-        <span className="background-status-text">
-          {generationPaused
-            ? 'Paused'
-            : backgroundStage === 'analyzing'
-              ? 'Analysing...'
-              : backgroundStage === 'prompting'
-                ? 'Creating image prompt...'
-                : backgroundStage === 'generating'
-                  ? 'Generating image...'
-                  : 'Ready'}
-        </span>
+        <div className="footer-left-controls">
+          <button
+            className={`slideshow-toggle-button ${slideshowPlaying ? '' : 'paused'}`}
+            onClick={() => setSlideshowPlaying((prev) => !prev)}
+            aria-pressed={slideshowPlaying}
+            title={slideshowPlaying ? 'Pause slideshow' : 'Resume slideshow'}
+          >
+            {slideshowPlaying ? 'Pause Slideshow' : 'Play Slideshow'}
+          </button>
+          <label htmlFor="slideshow-speed" className="slideshow-speed-label">
+            Speed
+          </label>
+          <select
+            id="slideshow-speed"
+            className="slideshow-speed-select"
+            value={slideshowSpeedMs}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => setSlideshowSpeedMs(Number(event.target.value))}
+          >
+            {SLIDESHOW_SPEED_OPTIONS.map((optionMs) => (
+              <option key={optionMs} value={optionMs}>
+                {Math.round(optionMs / 1000)}s
+              </option>
+            ))}
+          </select>
+          {isAdmin && (
+            <>
+              <span className="footer-divider" aria-hidden="true"></span>
+              <button
+                className={`generation-toggle-button ${generationPaused ? 'paused' : ''}`}
+                onClick={toggleGeneration}
+                title={generationPaused ? 'Start image generation' : 'Stop image generation'}
+                aria-pressed={generationPaused}
+              >
+                {generationPaused ? 'Start Image Generation' : 'Stop Image Generation'}
+              </button>
+              <span className="background-status-label">Next Image:</span>
+              <span className="background-status-text">
+                {generationPaused
+                  ? 'Paused'
+                  : backgroundStage === 'analyzing'
+                    ? 'Analysing...'
+                    : backgroundStage === 'prompting'
+                      ? 'Creating image prompt...'
+                      : backgroundStage === 'generating'
+                        ? 'Generating image...'
+                        : 'Ready'}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="footer-right-controls">
+          <button
+            className="settings-button footer-settings-button"
+            onClick={openAdminDialog}
+            title="Admin settings"
+            aria-label="Admin settings"
+          >
+            ⚙️
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -65,6 +65,32 @@ IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'}
 # History of generated images (capped to the most recent 200 in memory)
 generated_history = []
 MAX_HISTORY = 200
+def prune_generated_history():
+    """Remove in-memory history entries whose files are missing."""
+    global generated_history
+
+    if not generated_history:
+        return
+
+    pruned: list[dict] = []
+    removed = 0
+
+    for entry in generated_history:
+        filename = entry.get("filename")
+        if not filename:
+            removed += 1
+            continue
+
+        file_path = GENERATED_DIR / str(filename)
+        if file_path.exists():
+            pruned.append(entry)
+        else:
+            removed += 1
+
+    if removed:
+        generated_history = pruned
+        print(f"🧹 Pruned {removed} generated history entries with missing files")
+
 
 # Track recently used style prompts to encourage variety
 recent_style_prompts: deque[tuple[str, str]] = deque(maxlen=20)
@@ -369,6 +395,7 @@ def load_generated_history_from_disk(max_entries: int = MAX_HISTORY):
 
 # Load any existing history when the server process starts
 load_generated_history_from_disk()
+
 
 class AnalyzeRequest(BaseModel):
     """Request model for image analysis"""
@@ -844,6 +871,7 @@ async def generate_ai_image(request: GenerateRequest):
 
 @app.get("/api/generated/history")
 async def get_generated_history():
+    prune_generated_history()
     """Get list of recently generated images"""
     return {
         "history": generated_history

@@ -1,0 +1,67 @@
+# Cursor AI Rules for Our Wallpaper Project
+
+## Project Context
+- Digital frame app displaying AI-generated artwork from iCloud photos
+- Target: Family sharing via public URL
+- Current Phase: Phase 1 (iCloud Photo Access) - Complete
+- Deployment: Railway.app or similar PaaS (no heavy Docker management)
+
+## Architecture
+- Frontend: React 18 + TypeScript + Vite
+- Backend: Python + FastAPI + pyicloud
+- Deployment: Single container, serves both API and static frontend
+- See TECH_NOTES.md for complete technical documentation
+
+## Code Style Preferences
+- TypeScript: Strict mode enabled
+- React: Functional components with hooks (no class components)
+- Python: Type hints preferred, f-strings for formatting
+- CSS: Plain CSS (no preprocessors), BEM-style naming
+- Comments: Explain "why" not "what"
+
+## Development Principles
+- Keep it simple - avoid over-engineering
+- Prioritize deployability and maintainability
+- "Vibe coding" - iterative, exploratory approach
+- Document decisions in TECH_NOTES.md
+
+## File Organization
+- Backend code in backend/
+- React code in src/
+- Documentation in root (README, ROADMAP, etc.)
+- No nested feature folders until needed (Phase 3+)
+
+## Security
+- All credentials in environment variables
+- Never commit .env or .icloud/ directory
+- Use app-specific passwords for iCloud
+- Simple HTTP Basic Auth for viewer protection (family use only)
+
+## Testing
+- Phase 1: No tests (rapid prototyping)
+- Phase 2+: Add tests when logic becomes complex
+- Prefer integration tests over unit tests
+
+## Deployment Targets
+- Primary: Railway.app (git-based deployment)
+- Alternative: Render.com, Fly.io, OpenShift
+- Must work in containerized environment
+- Environment variables for all config
+
+## Dependencies
+- Pin major versions in requirements.txt and package.json
+- Minimize dependencies - only add when needed
+- Document why dependencies exist (see TECH_NOTES.md)
+
+## Future Considerations
+- Phase 2: Prompt generation (frontend only)
+- Phase 3: Gemini AI integration (backend expansion)
+- Phase 4: Auto-rotation + WebSockets
+- See ROADMAP.md for full plan
+
+## AI Assistant Guidelines
+- Read TECH_NOTES.md before making architectural changes
+- Follow existing patterns in codebase
+- Update documentation when making significant changes
+- Keep user (dtaylor) informed of trade-offs and alternatives
+

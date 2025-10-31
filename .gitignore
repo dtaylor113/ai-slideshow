@@ -1,0 +1,94 @@
+# Node / Vite artifacts
+node_modules/
+dist/
+.vite/
+
+# Python build artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local environments & secrets
+.env
+.env.*
+*.env
+.python-version
+.venv/
+venv/
+
+# OS / Editor cruft
+.DS_Store
+.idea/
+.vscode/
+
+# Personal data & generated media
+photos/
+.icloud/
+
+# Logs created during experimentation
+log-*.txt
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# But keep .env.example (should be committed)
+!.env.example
+
+# iCloud session data (old - no longer used)
+backend/.icloud/
+
+# Google Photos credentials and tokens
+credentials.json
+token.pickle
+

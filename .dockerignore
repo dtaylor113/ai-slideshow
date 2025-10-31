@@ -1,0 +1,44 @@
+# Node
+node_modules/
+npm-debug.log*
+dist/
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# iCloud session
+backend/.icloud/
+
+# Documentation
+README.md
+ROADMAP.md
+*.md
+

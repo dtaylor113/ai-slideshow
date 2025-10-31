@@ -1,0 +1,1148 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
+import { iCloudAPI, Photo, AnalyzeResponse, HistoryEntry } from '../services/api'
+import './PhotoViewer.css'
+
+type BackgroundResult = {
+  photo: Photo
+  analysis: AnalyzeResponse
+  artPrompt: string
+  promptTemplate?: string | null
+  generationPrompt?: string | null
+  generatedImage: string
+  id: string
+}
+
+const buildLegacyGenerationPrompt = (stylePrompt: string): string => {
+  return `Transform this image ${stylePrompt}.
+
+Preserve the recognizable likeness of every person or subject, matching faces, expressions, and defining details as closely as possible.
+
+Make the transformation bold and distinctive.`
+}
+
+const PHOTOREAL_STYLE_KEYWORDS = [
+  'photoreal',
+  'photograph',
+  'photo-real',
+  'cinematic',
+  'film still',
+  'realistic',
+  'dslr',
+  'hdr',
+  'ultra-detailed'
+]
+
+const GRAPHIC_STYLE_KEYWORDS = [
+  'poster',
+  'graphic',
+  'vector',
+  'flat',
+  'sticker',
+  'icon',
+  'logo',
+  'deco',
+  'constructivist',
+  'screenprint',
+  'minimalist',
+  'infographic',
+  'schematic'
+]
+
+const STYLIZED_STYLE_KEYWORDS = [
+  'painting',
+  'oil',
+  'watercolor',
+  'gouache',
+  'illustration',
+  'concept art',
+  'anime',
+  'storybook',
+  'pastel',
+  'chalk',
+  'charcoal',
+  'sketch',
+  'ink',
+  'woodblock',
+  'mural',
+  'graffiti',
+  'fresco',
+  'tapestry'
+]
+
+const SPORTS_KEYWORDS = [
+  'soccer',
+  'baseball',
+  'basketball',
+  'football',
+  'game',
+  'goal',
+  'stadium',
+  'athletic',
+  'competition',
+  'cheering',
+  'tournament',
+  'field'
+]
+
+const PORTRAIT_KEYWORDS = [
+  'portrait',
+  'family',
+  'couple',
+  'friends',
+  'smiling',
+  'posing',
+  'close-up',
+  'wedding',
+  'bride',
+  'groom',
+  'child',
+  'baby',
+  'group photo'
+]
+
+const ANIMAL_KEYWORDS = [
+  'dog',
+  'cat',
+  'puppy',
+  'kitten',
+  'horse',
+  'goat',
+  'cow',
+  'pet',
+  'animal',
+  'wildlife'
+]
+
+const LANDSCAPE_KEYWORDS = [
+  'mountain',
+  'valley',
+  'forest',
+  'trees',
+  'river',
+  'lake',
+  'waterfall',
+  'meadow',
+  'canyon',
+  'desert'
+]
+
+const BEACH_KEYWORDS = [
+  'beach',
+  'ocean',
+  'shore',
+  'waves',
+  'coast',
+  'tide',
+  'tropical',
+  'seaside'
+]
+
+const CITY_KEYWORDS = [
+  'city',
+  'urban',
+  'street',
+  'downtown',
+  'skyscraper',
+  'traffic',
+  'metropolis'
+]
+
+const NIGHT_KEYWORDS = [
+  'night',
+  'evening',
+  'moonlit',
+  'starry',
+  'fireworks',
+  'midnight',
+  'twilight'
+]
+
+const HOLIDAY_KEYWORDS = [
+  'christmas',
+  'holiday',
+  'festive',
+  'halloween',
+  'pumpkin',
+  'spooky',
+  'easter',
+  'birthday',
+  'celebration'
+]
+
+const LIGHTING_MAPPINGS: Array<{ keywords: string[]; cue: string }> = [
+  { keywords: ['sunset', 'golden', 'late afternoon', 'sun-drenched'], cue: 'warm golden-hour lighting with gentle highlights' },
+  { keywords: ['dawn', 'sunrise', 'morning light'], cue: 'soft morning light with delicate shadows' },
+  { keywords: ['night', 'neon', 'city lights', 'midnight', 'fireworks'], cue: 'dramatic low-light contrast with vibrant highlights' },
+  { keywords: ['candle', 'cozy', 'fireplace', 'indoor glow'], cue: 'intimate warm indoor lighting and soft falloff' },
+  { keywords: ['snow', 'winter', 'frost', 'icy'], cue: 'crisp cool winter lighting with subtle glints' },
+  { keywords: ['storm', 'rain', 'overcast', 'mist'], cue: 'moody diffused lighting with atmospheric haze' }
+]
+
+const STYLIZED_RENDER_CUES: Array<{ keywords: string[]; cue: string }> = [
+  { keywords: ['watercolor', 'ink', 'wash'], cue: 'loose watercolor washes layered with gentle ink linework' },
+  { keywords: ['oil', 'impasto', 'baroque'], cue: 'rich oil brushstrokes and layered impasto textures' },
+  { keywords: ['gouache', 'poster', 'mid-century'], cue: 'opaque gouache layers with bold poster-style blocking' },
+  { keywords: ['woodblock', 'ukiyo', 'print'], cue: 'precise woodblock carving marks with layered ink textures' },
+  { keywords: ['stained glass', 'glass', 'mosaic'], cue: 'luminous stained-glass panes with dark leading outlines' },
+  { keywords: ['studio ghibli', 'animation', 'anime'], cue: 'hand-painted animation backgrounds with soft atmospheric blooms' },
+  { keywords: ['storybook', 'mary blair'], cue: 'playful storybook shapes with simplified, charming forms' },
+  { keywords: ['graffiti', 'street art'], cue: 'energetic spray-paint textures and bold street-art linework' }
+]
+
+const GRAPHIC_RENDER_CUES: Array<{ keywords: string[]; cue: string }> = [
+  { keywords: ['poster', 'propaganda', 'constructivist'], cue: 'bold geometric composition, large typography fields, and high contrast' },
+  { keywords: ['sticker', 'kawaii', 'chibi'], cue: 'clean vector outlines, simple cel shading, and sticker-friendly framing' },
+  { keywords: ['art deco', 'deco'], cue: 'symmetrical deco framing with metallic accents and tiered shapes' },
+  { keywords: ['minimalist', 'flat'], cue: 'minimal flat-color planes with crisp negative space' }
+]
+
+const PALETTE_CUES: Array<{ keywords: string[]; cue: string }> = [
+  { keywords: ['autumn', 'fall', 'pumpkin', 'harvest'], cue: 'warm autumnal oranges, ambers, and deep maroons' },
+  { keywords: ['winter', 'snow', 'icy', 'frost'], cue: 'icy blues, silvery whites, and crystalline highlights' },
+  { keywords: ['spring', 'garden', 'floral', 'blossom'], cue: 'fresh spring pastels with soft greens and blooming pinks' },
+  { keywords: ['summer', 'beach', 'tropical', 'sunny'], cue: 'sun-drenched aquas, corals, and vibrant citrus tones' },
+  { keywords: ['neon', 'synthwave', 'cyberpunk', 'retro-futuristic'], cue: 'electric neon magentas, cyan glow, and midnight purples' },
+  { keywords: ['halloween', 'spooky', 'gothic'], cue: 'midnight blacks, haunting violets, and candlelit oranges' },
+  { keywords: ['christmas', 'holiday', 'festive'], cue: 'rich evergreen, deep crimson, and warm golden highlights' }
+]
+
+type PromptMode = 'photoreal' | 'stylized' | 'graphic'
+type SceneFocus = 'sports' | 'portrait' | 'animals' | 'landscape' | 'beach' | 'city' | 'night' | 'general'
+
+const containsKeyword = (textLower: string, keywords: string[]) => {
+  return keywords.some((keyword) => textLower.includes(keyword))
+}
+
+const ensureSentence = (text: string): string => {
+  const trimmed = text.trim()
+  if (!trimmed) return ''
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`
+}
+
+const extractSubjectCue = (description: string): string => {
+  if (!description) return ''
+  const sentences = description
+    .split(/[.!?]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+  return sentences[0] || ''
+}
+
+const determinePromptMode = (_analysis: string, stylePrompt: string): PromptMode => {
+  const styleLower = stylePrompt.toLowerCase()
+
+  if (containsKeyword(styleLower, PHOTOREAL_STYLE_KEYWORDS)) {
+    return 'photoreal'
+  }
+
+  if (containsKeyword(styleLower, GRAPHIC_STYLE_KEYWORDS)) {
+    return 'graphic'
+  }
+
+  if (containsKeyword(styleLower, STYLIZED_STYLE_KEYWORDS)) {
+    return 'stylized'
+  }
+
+  // Default to stylized when in doubt, but lean photoreal if the style prompt is sparse.
+  return stylePrompt.trim().length > 0 ? 'stylized' : 'photoreal'
+}
+
+const determineSceneFocus = (analysisLower: string): SceneFocus => {
+  if (containsKeyword(analysisLower, SPORTS_KEYWORDS)) return 'sports'
+  if (containsKeyword(analysisLower, ANIMAL_KEYWORDS)) return 'animals'
+  if (containsKeyword(analysisLower, PORTRAIT_KEYWORDS)) return 'portrait'
+  if (containsKeyword(analysisLower, BEACH_KEYWORDS)) return 'beach'
+  if (containsKeyword(analysisLower, LANDSCAPE_KEYWORDS)) return 'landscape'
+  if (containsKeyword(analysisLower, CITY_KEYWORDS)) return 'city'
+  if (containsKeyword(analysisLower, NIGHT_KEYWORDS)) return 'night'
+  return 'general'
+}
+
+const pickLightingCue = (analysisLower: string, styleLower: string): string => {
+  for (const mapping of LIGHTING_MAPPINGS) {
+    if (containsKeyword(analysisLower, mapping.keywords) || containsKeyword(styleLower, mapping.keywords)) {
+      return mapping.cue
+    }
+  }
+  return 'balanced, natural lighting'
+}
+
+const pickCameraCue = (sceneFocus: SceneFocus): string => {
+  switch (sceneFocus) {
+    case 'portrait':
+      return 'a shallow depth of field reminiscent of an 85mm portrait lens'
+    case 'sports':
+      return 'a fast shutter feel that freezes motion with dynamic framing'
+    case 'animals':
+      return 'a telephoto perspective that keeps the subject crisp against a soft background'
+    case 'landscape':
+      return 'a wide-angle sense of scale that preserves sweeping depth'
+    case 'beach':
+      return 'a wide coastal perspective with gentle atmospheric haze'
+    case 'city':
+      return 'a cinematic street-level perspective with layered depth'
+    case 'night':
+      return 'carefully controlled highlights and subtle long-exposure glow'
+    default:
+      return 'natural depth and crisp focus that feels cinematic'
+  }
+}
+
+const pickStylizedRenderCue = (styleLower: string): string => {
+  for (const mapping of STYLIZED_RENDER_CUES) {
+    if (containsKeyword(styleLower, mapping.keywords)) {
+      return mapping.cue
+    }
+  }
+  return 'expressive brushwork and stylized detailing'
+}
+
+const pickGraphicRenderCue = (styleLower: string): string => {
+  for (const mapping of GRAPHIC_RENDER_CUES) {
+    if (containsKeyword(styleLower, mapping.keywords)) {
+      return mapping.cue
+    }
+  }
+  return 'high-contrast graphic shapes with confident, clean linework'
+}
+
+const pickPaletteCue = (analysisLower: string, styleLower: string): string => {
+  for (const mapping of PALETTE_CUES) {
+    if (containsKeyword(analysisLower, mapping.keywords) || containsKeyword(styleLower, mapping.keywords)) {
+      return mapping.cue
+    }
+  }
+
+  if (containsKeyword(analysisLower, HOLIDAY_KEYWORDS) || containsKeyword(styleLower, HOLIDAY_KEYWORDS)) {
+    return 'festive tones with luminous accent colors'
+  }
+
+  return 'a harmonious palette that reinforces the chosen style'
+}
+
+const buildEnhancedGenerationPrompt = (description: string, stylePrompt: string): string => {
+  const cleanStylePrompt = stylePrompt.trim()
+  if (!cleanStylePrompt) {
+    return ''
+  }
+
+  const analysisText = description?.trim() ?? ''
+  const analysisLower = analysisText.toLowerCase()
+  const styleLower = cleanStylePrompt.toLowerCase()
+
+  const mode = determinePromptMode(analysisText, cleanStylePrompt)
+  const sceneFocus = determineSceneFocus(analysisLower)
+  const subjectCue = extractSubjectCue(analysisText)
+  const subjectSentence = subjectCue
+    ? ensureSentence(`Focus on the main subjects described: ${subjectCue}`)
+    : ''
+
+  if (mode === 'photoreal') {
+    const lightingCue = pickLightingCue(analysisLower, styleLower)
+    const cameraCue = pickCameraCue(sceneFocus)
+    return [
+      ensureSentence(`Transform this image ${cleanStylePrompt}`),
+      subjectSentence,
+      ensureSentence('Preserve the recognizable likeness of every person or subject, matching faces, expressions, and defining details as closely as possible'),
+      ensureSentence(`Render the scene with ${lightingCue} and ${cameraCue}`),
+      'Deliver a photorealistic result with lifelike textures, depth, and atmosphere.'
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  if (mode === 'graphic') {
+    const renderCue = pickGraphicRenderCue(styleLower)
+    const paletteCue = pickPaletteCue(analysisLower, styleLower)
+    return [
+      ensureSentence(`Transform this image ${cleanStylePrompt}`),
+      subjectSentence,
+      ensureSentence('Preserve the recognizable likeness of every person or subject, matching faces, expressions, and defining details as closely as possible'),
+      ensureSentence(`Design the composition with ${renderCue}`),
+      ensureSentence(`Apply ${paletteCue} while keeping key subjects instantly recognizable`)
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
+  const renderCue = pickStylizedRenderCue(styleLower)
+  const paletteCue = pickPaletteCue(analysisLower, styleLower)
+
+  return [
+    ensureSentence(`Transform this image ${cleanStylePrompt}`),
+    subjectSentence,
+    ensureSentence('Preserve the recognizable likeness of every person or subject, matching faces, expressions, and defining details as closely as possible'),
+    ensureSentence(`Reimagine the scene with ${renderCue}`),
+    ensureSentence(`Use ${paletteCue} and preserve the emotional focus of the moment`)
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+const buildGenerationPrompt = (description: string, stylePrompt: string): string => {
+  const enhanced = buildEnhancedGenerationPrompt(description, stylePrompt)
+  if (!enhanced || enhanced.trim().length === 0) {
+    return buildLegacyGenerationPrompt(stylePrompt)
+  }
+  return enhanced
+}
+
+const GENERATION_PAUSE_CYCLE_MS = 5000
+
+function PhotoViewer() {
+  const [currentPhoto, setCurrentPhoto] = useState<Photo | null>(null)
+  const [error, setError] = useState('')
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null)
+  const [artPrompt, setArtPrompt] = useState<string | null>(null)
+  const [promptTemplate, setPromptTemplate] = useState<string | null>(null)
+  const [generationPrompt, setGenerationPrompt] = useState<string | null>(null)
+  const [showPromptInfo, setShowPromptInfo] = useState(false)
+  const [showWorkflowInfo, setShowWorkflowInfo] = useState(false)
+  const [filmstripWidth, setFilmstripWidth] = useState(360)
+  const [hoverPreview, setHoverPreview] = useState<{
+    top: number
+    entryId: string
+    generated: string
+    original?: string
+    isLoading: boolean
+  } | null>(null)
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null)
+  const [generatedId, setGeneratedId] = useState<string | null>(null)
+  
+  // Processing stages: 'analyzing', 'prompting', 'generating', 'complete'
+  const [stage, setStage] = useState<'analyzing' | 'prompting' | 'generating' | 'complete' | null>(null)
+  const [backgroundStage, setBackgroundStage] = useState<'analyzing' | 'prompting' | 'generating' | null>(null)
+  const [showOriginal, setShowOriginal] = useState(false)
+  
+  // History and generation control
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [historyThumbnails, setHistoryThumbnails] = useState<Record<string, string>>({})
+  const [historyOriginalPhotos, setHistoryOriginalPhotos] = useState<Record<string, Photo>>({})
+  const [generationPaused, setGenerationPaused] = useState(false)
+
+  // Prevent duplicate initialization in React StrictMode
+  const initialized = useRef(false)
+  const processing = useRef(false)
+  const backgroundProcessing = useRef(false)
+  const filmstripResizeActive = useRef(false)
+  const filmstripResizeData = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: filmstripWidth })
+  const viewerRef = useRef<HTMLDivElement>(null)
+  const historyOriginalRequests = useRef(new Set<string>())
+  const generationPausedRef = useRef(generationPaused)
+  const cycleTimerRef = useRef<number | null>(null)
+ 
+  useEffect(() => {
+    generationPausedRef.current = generationPaused
+  }, [generationPaused])
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!filmstripResizeActive.current) return
+      const delta = event.clientX - filmstripResizeData.current.startX
+      const newWidth = Math.min(500, Math.max(200, filmstripResizeData.current.startWidth + delta))
+      setFilmstripWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      if (filmstripResizeActive.current) {
+        filmstripResizeActive.current = false
+        document.body.classList.remove('resizing-filmstrip')
+      }
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
+  const startFilmstripResize = (event: ReactMouseEvent<HTMLDivElement>) => {
+    filmstripResizeActive.current = true
+    filmstripResizeData.current = { startX: event.clientX, startWidth: filmstripWidth }
+    document.body.classList.add('resizing-filmstrip')
+  }
+
+  const handleThumbnailEnter = (event: ReactMouseEvent<HTMLDivElement>, entry: HistoryEntry) => {
+    if (!viewerRef.current) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const top = Math.max(24, rect.top)
+    const generated = historyThumbnails[entry.id]
+    if (!generated) return
+
+    const originalPhoto = historyOriginalPhotos[entry.id]
+    const original = originalPhoto?.data ?? null
+    setHoverPreview({
+      top,
+      entryId: entry.id,
+      generated,
+      original,
+      isLoading: !original
+    })
+
+    if (!original && !historyOriginalRequests.current.has(entry.id)) {
+      historyOriginalRequests.current.add(entry.id)
+
+      iCloudAPI
+        .getPhotoByFilename(entry.original_filename)
+        .then((photo) => {
+          setHistoryOriginalPhotos((prev) => {
+            if (prev[entry.id]) {
+              return prev
+            }
+            return { ...prev, [entry.id]: photo }
+          })
+
+          setHoverPreview((prev) => {
+            if (!prev || prev.entryId !== entry.id) {
+              return prev
+            }
+            return {
+              ...prev,
+              original: photo.data,
+              isLoading: false
+            }
+          })
+        })
+        .catch((err) => {
+          console.error('Failed to load original for hover preview:', err)
+          setHoverPreview((prev) => {
+            if (!prev || prev.entryId !== entry.id) {
+              return prev
+            }
+            return {
+              ...prev,
+              isLoading: false
+            }
+          })
+        })
+        .finally(() => {
+          historyOriginalRequests.current.delete(entry.id)
+        })
+    }
+  }
+
+  const handleThumbnailLeave = () => {
+    setHoverPreview(null)
+  }
+
+  const applyBackgroundResult = (result: BackgroundResult) => {
+    setError('')
+    setHoverPreview(null)
+    setCurrentPhoto(result.photo)
+    setAnalysis(result.analysis)
+    setArtPrompt(result.artPrompt)
+    setPromptTemplate(result.promptTemplate ?? null)
+    setGenerationPrompt(result.generationPrompt ?? null)
+    setGeneratedImage(result.generatedImage)
+    setGeneratedId(result.id)
+    setHistoryOriginalPhotos((prev) => (prev[result.id] ? prev : { ...prev, [result.id]: result.photo }))
+    setShowOriginal(false)
+    setShowPromptInfo(false)
+    setStage('complete')
+  }
+
+  const fetchAndProcessPhoto = async () => {
+    // Prevent duplicate calls
+    if (processing.current) {
+      console.log('⏭️ Skipping duplicate fetch - already processing')
+      return
+    }
+    
+    processing.current = true
+    setError('')
+    setHoverPreview(null)
+    setAnalysis(null)
+    setArtPrompt(null)
+    setPromptTemplate(null)
+    setGenerationPrompt(null)
+    setShowPromptInfo(false)
+    setGeneratedImage(null)
+    setStage(null)
+    setShowOriginal(false)
+
+    try {
+      console.log('📸 Fetching random photo...')
+      const photo = await iCloudAPI.getRandomPhoto()
+      setCurrentPhoto(photo)
+      console.log(`✅ Got photo: ${photo.filename}`)
+      
+      // Step 1: Analyze the image
+      console.log('👁️ Analyzing image...')
+      setStage('analyzing')
+      const analysisResult = await iCloudAPI.analyzeImage(photo)
+      setAnalysis(analysisResult)
+      console.log('✅ Analysis complete')
+      
+      // Step 2: Generate creative art prompt based on analysis
+      console.log('🎨 Generating art prompt...')
+      setStage('prompting')
+      const promptResult = await iCloudAPI.generatePrompt(analysisResult.description, photo.filename)
+      setArtPrompt(promptResult.art_prompt)
+      setPromptTemplate(promptResult.prompt_template)
+      console.log(`✨ Prompt generated: ${promptResult.art_prompt}`)
+      
+      // Step 3: Generate styled image using the AI-generated prompt
+      console.log('🍌 Generating styled image...')
+      setStage('generating')
+      const generationPromptText = buildGenerationPrompt(analysisResult.description, promptResult.art_prompt)
+      setGenerationPrompt(generationPromptText)
+      const generateResult = await iCloudAPI.generateImage(
+        photo, 
+        analysisResult.description,
+        promptResult.art_prompt,
+        promptResult.prompt_template,
+        generationPromptText
+      )
+      setGeneratedImage(generateResult.generated_image)
+      setGeneratedId(generateResult.id)
+      setHistoryOriginalPhotos((prev) => (prev[generateResult.id] ? prev : { ...prev, [generateResult.id]: photo }))
+      setPromptTemplate(generateResult.prompt_template ?? promptResult.prompt_template)
+      setStage('complete')
+      console.log('✅ Generation complete')
+      
+      // Fetch updated history
+      await fetchHistory()
+      
+    } catch (err: any) {
+      console.error('❌ Error:', err)
+      setStage(null)
+      setError(err.response?.data?.detail || 'Failed to process image')
+    } finally {
+      processing.current = false
+    }
+  }
+
+  const fetchHistory = async () => {
+    try {
+      const historyData = await iCloudAPI.getGeneratedHistory()
+      setHistory(historyData.history)
+      
+      // Load thumbnails for all history items
+      loadHistoryThumbnails(historyData.history)
+    } catch (err) {
+      console.error('Failed to fetch history:', err)
+    }
+  }
+
+  const loadHistoryThumbnails = async (entries: HistoryEntry[]) => {
+    const thumbnails: Record<string, string> = { ...historyThumbnails }
+    const missing = entries.filter((entry) => !thumbnails[entry.id])
+    const concurrency = 10
+
+    for (let i = 0; i < missing.length; i += concurrency) {
+      const batch = missing.slice(i, i + concurrency)
+      await Promise.all(
+        batch.map(async (entry) => {
+          try {
+            const imageData = await iCloudAPI.getGeneratedImage(entry.filename)
+            thumbnails[entry.id] = imageData.data
+          } catch (err) {
+            console.error(`Failed to load thumbnail for ${entry.filename}:`, err)
+          }
+        })
+      )
+    }
+
+    setHistoryThumbnails(thumbnails)
+  }
+
+  const viewHistoryImage = useCallback(async (entry: HistoryEntry, options?: { fromAutoCycle?: boolean }) => {
+    const fromAutoCycle = options?.fromAutoCycle ?? false
+    try {
+      if (fromAutoCycle) {
+        console.log(`🔁 Cycling to history image: ${entry.filename}`)
+      } else {
+        console.log(`📷 Viewing history image: ${entry.filename}`)
+      }
+      setHoverPreview(null)
+      setError('')
+      
+      // Focus on the selected history entry
+      if (!fromAutoCycle) {
+        setShowPromptInfo(false)
+      }
+
+      // Update metadata immediately
+      setGeneratedId(entry.id)
+      setAnalysis({ filename: entry.original_filename, description: entry.description, analysis_time: entry.generation_time })
+      setArtPrompt(entry.prompt)
+      setPromptTemplate(entry.prompt_template || null)
+      setGenerationPrompt(entry.generation_prompt || null)
+      setStage('complete')
+      setShowOriginal(false)
+
+      // Display cached generated image instantly if available
+      if (historyThumbnails[entry.id]) {
+        setGeneratedImage(historyThumbnails[entry.id])
+      } else {
+        iCloudAPI.getGeneratedImage(entry.filename)
+          .then((imageData) => setGeneratedImage(imageData.data))
+          .catch((imgErr) => {
+            console.error('Failed to load history image:', imgErr)
+            setError('Failed to load history image')
+          })
+      }
+
+      // Fetch the original photo asynchronously (for toggle)
+      const cachedOriginal = historyOriginalPhotos[entry.id]
+      if (cachedOriginal) {
+        setCurrentPhoto(cachedOriginal)
+      } else {
+        if (!fromAutoCycle) {
+          console.log(`📸 Fetching original photo: ${entry.original_filename}`)
+        }
+        iCloudAPI.getPhotoByFilename(entry.original_filename)
+          .then((originalPhoto) => {
+            setCurrentPhoto(originalPhoto)
+            setHistoryOriginalPhotos((prev) => ({ ...prev, [entry.id]: originalPhoto }))
+          })
+          .catch((photoErr) => {
+            console.error('Failed to load original photo:', photoErr)
+            setError('Failed to load original photo')
+          })
+      }
+    } catch (err) {
+      console.error('Failed to load history entry:', err)
+      setError('Failed to load history image')
+    }
+  }, [historyOriginalPhotos, historyThumbnails])
+
+  useEffect(() => {
+    const clearTimer = () => {
+      if (cycleTimerRef.current !== null) {
+        window.clearTimeout(cycleTimerRef.current)
+        cycleTimerRef.current = null
+      }
+    }
+
+    clearTimer()
+
+    if (!generationPaused || history.length <= 1) {
+      return clearTimer
+    }
+
+    cycleTimerRef.current = window.setTimeout(() => {
+      const currentIndex = history.findIndex((entry) => entry.id === generatedId)
+      const nextIndex = currentIndex === -1 || currentIndex === history.length - 1 ? 0 : currentIndex + 1
+      const nextEntry = history[nextIndex]
+
+      if (nextEntry) {
+        void viewHistoryImage(nextEntry, { fromAutoCycle: true })
+      }
+    }, GENERATION_PAUSE_CYCLE_MS)
+
+    return clearTimer
+  }, [generationPaused, history, generatedId, viewHistoryImage])
+
+  const pauseGeneration = () => {
+    if (generationPausedRef.current) return
+    console.log('⏹️  Pausing image generation')
+    generationPausedRef.current = true
+    setGenerationPaused(true)
+    setBackgroundStage(null)
+  }
+
+  const resumeGeneration = () => {
+    if (!generationPausedRef.current) return
+    console.log('▶️  Resuming image generation')
+    generationPausedRef.current = false
+    setGenerationPaused(false)
+    setHoverPreview(null)
+    setShowPromptInfo(false)
+
+    if (!backgroundProcessing.current && stage === 'complete') {
+      setTimeout(() => {
+        if (!backgroundProcessing.current && !generationPausedRef.current) {
+          fetchAndProcessPhotoBackground()
+        }
+      }, 0)
+    }
+  }
+
+  const toggleGeneration = () => {
+    if (generationPausedRef.current) {
+      resumeGeneration()
+    } else {
+      pauseGeneration()
+    }
+  }
+
+  const fetchAndProcessPhotoBackground = async () => {
+    if (backgroundProcessing.current) {
+      console.log('⏭️ Background processing already in progress')
+      return
+    }
+
+    if (generationPausedRef.current) {
+      console.log('⏹️ Background processing skipped - image generation paused')
+      return
+    }
+    
+    backgroundProcessing.current = true
+
+    const cleanup = () => {
+      setBackgroundStage(null)
+      backgroundProcessing.current = false
+    }
+
+    try {
+      console.log('🔄 [Background] Starting next photo processing...')
+      setBackgroundStage('analyzing')
+      const photo = await iCloudAPI.getRandomPhoto()
+      console.log(`🔄 [Background] Got photo: ${photo.filename}`)
+
+      if (generationPausedRef.current) {
+        cleanup()
+        return
+      }
+      
+      const analysisResult = await iCloudAPI.analyzeImage(photo)
+      console.log('🔄 [Background] Analysis complete')
+
+      if (generationPausedRef.current) {
+        cleanup()
+        return
+      }
+      
+      setBackgroundStage('prompting')
+      const promptResult = await iCloudAPI.generatePrompt(analysisResult.description, photo.filename)
+      console.log(`🔄 [Background] Prompt: ${promptResult.art_prompt}`)
+
+      if (generationPausedRef.current) {
+        cleanup()
+        return
+      }
+      
+      setBackgroundStage('generating')
+      const generationPromptText = buildGenerationPrompt(analysisResult.description, promptResult.art_prompt)
+      const generateResult = await iCloudAPI.generateImage(
+        photo, 
+        analysisResult.description,
+        promptResult.art_prompt,
+        promptResult.prompt_template,
+        generationPromptText
+      )
+      console.log('🔄 [Background] Generation complete - preparing to swap in new image!')
+
+      if (generationPausedRef.current) {
+        cleanup()
+        return
+      }
+
+      const completedResult: BackgroundResult = {
+        photo,
+        analysis: analysisResult,
+        artPrompt: promptResult.art_prompt,
+        promptTemplate: generateResult.prompt_template ?? promptResult.prompt_template ?? null,
+        generationPrompt: generateResult.generation_prompt ?? generationPromptText,
+        generatedImage: generateResult.generated_image,
+        id: generateResult.id
+      }
+      
+      setHistoryOriginalPhotos((prev) => (prev[generateResult.id] ? prev : { ...prev, [generateResult.id]: photo }))
+
+      await fetchHistory()
+
+      if (generationPausedRef.current) {
+        cleanup()
+        return
+      }
+
+      cleanup()
+
+      applyBackgroundResult(completedResult)
+
+      if (!generationPausedRef.current) {
+        setTimeout(() => {
+          if (!generationPausedRef.current) {
+            fetchAndProcessPhotoBackground()
+          }
+        }, 100)
+      }
+
+    } catch (err: any) {
+      console.error('❌ [Background] Error:', err)
+      cleanup()
+      if (!generationPausedRef.current) {
+        setTimeout(() => {
+          if (!generationPausedRef.current) {
+            fetchAndProcessPhotoBackground()
+          }
+        }, 2000)
+      }
+    }
+  }
+
+  // Auto-fetch on mount - only once!
+  useEffect(() => {
+    if (!initialized.current) {
+      initialized.current = true
+      fetchAndProcessPhoto()
+    }
+  }, [])
+
+  // Start background processing when current image is complete
+  useEffect(() => {
+    if (stage === 'complete' && !backgroundProcessing.current && !generationPaused) {
+      console.log('🔄 Starting background processing for next image...')
+      fetchAndProcessPhotoBackground()
+    }
+  }, [stage, generationPaused])
+
+  // Fetch history on mount
+  useEffect(() => {
+    fetchHistory()
+  }, [])
+
+  // Determine which image to show
+  const displayImage = showOriginal 
+    ? currentPhoto?.data 
+    : (generatedImage || currentPhoto?.data)
+
+  return (
+    <div className="photo-viewer" ref={viewerRef}>
+      {error && (
+        <div className="error-message">{error}</div>
+      )}
+
+      <button
+        className="workflow-button"
+        onClick={() => {
+          setShowPromptInfo(false)
+          setShowWorkflowInfo(true)
+        }}
+        title="How the app works"
+        aria-label="Show workflow overview"
+      >
+        ℹ️
+      </button>
+
+      {showWorkflowInfo && (
+        <div className="workflow-popup" role="dialog" aria-modal="true">
+          <div className="workflow-content">
+            <div className="workflow-header">
+              <h4>How This Slideshow Works</h4>
+              <button
+                className="workflow-close"
+                onClick={() => setShowWorkflowInfo(false)}
+                aria-label="Close workflow overview"
+              >
+                ✕
+              </button>
+      </div>
+            <ol className="workflow-steps">
+              <li>
+                On startup a random local image is selected.
+              </li>
+              <li>
+                The image is resized to a thumbnail and sent to Google Gemini 2.5 Flash for a quick 2–3 sentence description of the image.
+              </li>
+              <li>
+                The description is sent to the same Gemini 2.5 Flash model which returns a single dramatic style idea as the image prompt.
+              </li>
+              <li>
+                The original photo plus the image prompt is then sent to Gemini 2.5 Flash Image ("Nano Banana") which generates the final stylized image.
+              </li>
+              <li>
+                The generated image, analysis, and prompts display immediately while the next photo begins processing in the background.
+              </li>
+              <li>
+                Clicking a history thumbnail reuses its saved analysis and prompts while new images keep processing in the background.
+              </li>
+            </ol>
+            <p className="workflow-note">
+              Background processing keeps one finished image ready to swap in so the slideshow feels continuous even while models are working.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Filmstrip - left sidebar with history */}
+      {history.length > 0 && (
+        <>
+          <div className="filmstrip" style={{ width: filmstripWidth }}>
+            <h3 className="filmstrip-title">Recent</h3>
+            <div className="filmstrip-scroll">
+              {history.map((entry) => (
+                <div
+                  key={entry.id}
+                  className={`filmstrip-item ${entry.id === generatedId ? 'active' : ''}`}
+                  onClick={() => viewHistoryImage(entry)}
+                  onMouseEnter={(event) => handleThumbnailEnter(event, entry)}
+                  onMouseLeave={handleThumbnailLeave}
+                  title={entry.prompt}
+                >
+                  <div className="filmstrip-thumbnail">
+                    {historyThumbnails[entry.id] ? (
+                      <img src={historyThumbnails[entry.id]} alt={entry.prompt} />
+                    ) : (
+                      <div className="filmstrip-placeholder">
+                        <span>🎨</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div
+            className="filmstrip-resizer"
+            onMouseDown={startFilmstripResize}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize recent thumbnails panel"
+          ></div>
+        </>
+      )}
+
+      {hoverPreview && (
+        <div
+          className="thumbnail-hover-preview"
+          style={{ top: hoverPreview.top, left: filmstripWidth + 24 }}
+        >
+          <div className="thumbnail-hover-images">
+            <div className="thumbnail-hover-image-block">
+              <span className="thumbnail-hover-label">Generated</span>
+              <img src={hoverPreview.generated} alt="Generated preview" />
+            </div>
+            <div className="thumbnail-hover-image-block">
+              <span className="thumbnail-hover-label">Original</span>
+              {hoverPreview.original ? (
+                <img src={hoverPreview.original} alt="Original preview" />
+              ) : (
+                <div className="thumbnail-hover-placeholder" aria-live="polite">
+                  {hoverPreview.isLoading ? 'Loading…' : 'Unavailable'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="main-content">
+        {/* Main Image Display */}
+        <div className="image-container">
+          {displayImage && (
+            <img src={displayImage} alt="Photo" className="main-image" />
+          )}
+          
+          {/* Overlay spinner during processing */}
+          {stage && stage !== 'complete' && (
+            <div className="processing-overlay">
+              <div className="spinner"></div>
+              {stage === 'analyzing' && (
+                <p className="overlay-text">Analysing...</p>
+              )}
+              {stage === 'prompting' && (
+                <p className="overlay-text">Creating image prompt...</p>
+              )}
+              {stage === 'generating' && (
+                <p className="overlay-text">Generating new image...</p>
+              )}
+            </div>
+          )}
+
+          {/* Toggle button (always show when we have generated image) */}
+          {generatedImage && stage === 'complete' && (
+            <button 
+              className="toggle-button"
+              onClick={() => setShowOriginal(!showOriginal)}
+              title={showOriginal ? 'Show generated' : 'Show original'}
+            >
+              {showOriginal ? '🎨' : '📸'}
+            </button>
+          )}
+
+        </div>
+
+        {/* Analysis Panel - only show after analyzing is done */}
+         {analysis && (
+           <aside className="analysis-panel" aria-live="polite">
+            <h3>Image Description</h3>
+            <div className="analysis-text" role="document">
+              <p>{analysis.description}</p>
+            </div>
+            {artPrompt && (
+              <>
+                <div className="prompt-divider"></div>
+                <div className="prompt-header">
+                  <h3>Image Prompt</h3>
+                  {promptTemplate && (
+                    <button
+                      className="prompt-info-button"
+                      onClick={() => setShowPromptInfo(true)}
+                      title="View prompt template"
+                      aria-label="View prompt template"
+                    >
+                      ℹ️
+                    </button>
+                  )}
+                </div>
+                <p className="art-prompt-text">"{artPrompt}"</p>
+      {showPromptInfo && promptTemplate && (
+                  <div className="prompt-info-popup" role="dialog" aria-modal="true">
+                    <div className="prompt-info-content">
+                      <div className="prompt-info-header">
+              <h4>Image Prompt Details</h4>
+                        <button
+                          className="prompt-info-close"
+                          onClick={() => setShowPromptInfo(false)}
+                          aria-label="Close prompt details"
+                        >
+                          ✕
+                        </button>
+                      </div>
+            <div className="prompt-info-sections split">
+              <div className="prompt-info-panel" aria-label="Image Prompt Template">
+                <h5 className="prompt-info-subtitle">Image Prompt Template</h5>
+                <pre className="prompt-info-text">{promptTemplate}</pre>
+              </div>
+              {generationPrompt && (
+                <div className="prompt-info-panel" aria-label="Image Generation Prompt">
+                  <h5 className="prompt-info-subtitle">Image Generation Prompt</h5>
+                  <pre className="prompt-info-text">{generationPrompt}</pre>
+                </div>
+              )}
+            </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </aside>
+        )}
+      </div>
+
+      {/* Background Processing Footer */}
+      <div className="background-status-footer">
+        <button
+          className={`generation-toggle-button ${generationPaused ? 'paused' : ''}`}
+          onClick={toggleGeneration}
+          title={generationPaused ? 'Start image generation' : 'Stop image generation'}
+          aria-pressed={generationPaused}
+        >
+          {generationPaused ? 'Start Image Generation' : 'Stop Image Generation'}
+        </button>
+        <span className="background-status-label">Next Image:</span>
+        <span className="background-status-text">
+          {generationPaused
+            ? 'Paused'
+            : backgroundStage === 'analyzing'
+              ? 'Analysing...'
+              : backgroundStage === 'prompting'
+                ? 'Creating image prompt...'
+                : backgroundStage === 'generating'
+                  ? 'Generating image...'
+                  : 'Ready'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+export default PhotoViewer

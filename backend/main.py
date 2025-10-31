@@ -344,11 +344,14 @@ def load_generated_history_from_disk(max_entries: int = MAX_HISTORY):
     loaded_entries: list[dict] = []
 
     if GENERATED_DIR.exists():
-        generated_files = [
+        all_generated = [
             path for path in GENERATED_DIR.iterdir()
             if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
         ]
-        generated_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        if len(all_generated) > max_entries:
+            generated_files = random.sample(all_generated, max_entries)
+        else:
+            generated_files = all_generated
 
         for path in generated_files:
             if len(loaded_entries) >= max_entries:

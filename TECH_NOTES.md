@@ -382,7 +382,7 @@ toggleGeneration() {
 **Key UI Elements:**
 
 1. **Filmstrip (Left, 100px)**
-   - Latest 200 generated images
+   - Latest 200 generated images (random subset on each load)
    - Thumbnail previews (actual images loaded)
    - Active item highlighted (blue border)
    - Vertical scroll if needed
@@ -411,6 +411,7 @@ toggleGeneration() {
 5. **Thumbnail hover preview**
    - Hovering a history item reveals generated art alongside the original photo
    - Lazy-loads originals only when requested to keep hover responsive
+   - Spinner shown until the original is available; missing originals produce a gentle notification only when requested
 
 6. **Prompt Details Popup**
    - Accessible from the "Image Prompt" tooltip button in the analysis panel.
@@ -424,6 +425,7 @@ toggleGeneration() {
 - Footer settings gear unlocks admin mode with password `football`, persisted for the current browser session.
 - When admin starts generation, the UI calls `fetchAndProcessPhoto()` to resume the pipeline and reveals status controls.
 - Every client polls `/api/generated/history` every 3 minutes, ensuring all viewers see fresh artwork once generation restarts.
+- The filmstrip displays a loading spinner until thumbnails are fetched; backend pruning removes missing generated files automatically.
 
 ### Color Scheme
 

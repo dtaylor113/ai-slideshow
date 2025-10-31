@@ -29,6 +29,7 @@ Then open `http://localhost:5173` in your browser!
 - ✅ Slideshow playback controls (play/pause + 3–30s speed selector)
 - ✅ Admin-only image generation controls (settings gear → password `football`)
 - ✅ Auto-pruning keeps history clean; filmstrip waits for thumbnails before displaying
+- ✅ Randomized gallery sample on each load (no two refreshes feel the same)
 - ✅ View original vs generated image toggle
 - ✅ FREE Google Gemini AI (vision + image generation)
 
@@ -79,6 +80,7 @@ Then open `http://localhost:5173` in your browser!
 - Playback controls let viewers pause/resume the slideshow and choose a speed between 3 and 30 seconds (default 8s).
 - History refreshes automatically every three minutes so all open browsers see the latest creations once generation is running.
 - Missing thumbnails/originals are pruned automatically; the filmstrip shows “Loading thumbnails…” until content is ready.
+- When the original photo is unavailable, the 🎨/📸 toggle shows a friendly notice instead of interrupting the slideshow.
 
 ## Project Structure
 
@@ -205,8 +207,8 @@ cd backend && python main.py  # Backend
 - First generation shows spinners, subsequent ones load in background
 
 ### Filmstrip shows placeholders
-- Thumbnails load after history fetches (may take a moment)
-- Check browser network tab for failed requests
+- The filmstrip now waits for thumbnails to load and shows **Loading thumbnails…** while images are fetched.
+- If a generated file was removed, the backend prunes it automatically; refresh to pick up the updated gallery.
 
 ### "Model not found" error
 - Make sure you're using the FREE Gemini tier (not Vertex AI)

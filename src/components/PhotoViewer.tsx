@@ -393,6 +393,12 @@ const DEFAULT_SLIDESHOW_INTERVAL_MS = 8000
 const HISTORY_REFRESH_INTERVAL_MS = 180000
 const SLIDESHOW_SPEED_OPTIONS = [3000, 5000, 8000, 12000, 20000, 30000]
 const ADMIN_PASSWORD = 'football'
+const STORAGE_KEYS = {
+  slideshowSpeed: 'ourwallpaper::slideshow-speed-ms',
+  slideshowPlaying: 'ourwallpaper::slideshow-playing',
+  adminVerified: 'ourwallpaper::admin-verified',
+  kioskMode: 'ourwallpaper::slideshow-only'
+}
 
 function PhotoViewer() {
   const [currentPhoto, setCurrentPhoto] = useState<Photo | null>(null)
@@ -423,11 +429,19 @@ function PhotoViewer() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [historyThumbnails, setHistoryThumbnails] = useState<Record<string, string>>({})
   const [historyOriginalPhotos, setHistoryOriginalPhotos] = useState<Record<string, Photo>>({})
+  const [unseenQueue, setUnseenQueue] = useState<string[]>([])
+  const [priorityQueue, setPriorityQueue] = useState<string[]>([])
   const [generationPaused, setGenerationPaused] = useState(true)
   const [slideshowPlaying, setSlideshowPlaying] = useState(true)
   const [slideshowSpeedMs, setSlideshowSpeedMs] = useState(DEFAULT_SLIDESHOW_INTERVAL_MS)
   const [thumbnailsLoading, setThumbnailsLoading] = useState(true)
   const [missingOriginal, setMissingOriginal] = useState(false)
+  const [slideshowOnly, setSlideshowOnly] = useState(() => {
+    if (typeof window === 'undefined') return true
+    const stored = window.localStorage.getItem(STORAGE_KEYS.kioskMode)
+    if (stored === null) return true
+    return stored === 'true'
+  })
   const [adminVerified, setAdminVerified] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [showAdminDialog, setShowAdminDialog] = useState(false)
@@ -445,6 +459,7 @@ function PhotoViewer() {
   const generatedIdRef = useRef<string | null>(generatedId)
   const historyThumbnailsRef = useRef<Record<string, string>>(historyThumbnails)
   const cycleTimerRef = useRef<number | null>(null)
+  const historyIdsRef = useRef<string[]>([])
  
   useEffect(() => {
     generationPausedRef.current = generationPaused
@@ -457,6 +472,41 @@ function PhotoViewer() {
   useEffect(() => {
     historyThumbnailsRef.current = historyThumbnails
   }, [historyThumbnails])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEYS.kioskMode, String(slideshowOnly))
+    }
+  }, [slideshowOnly])
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.classList.toggle('slideshow-only-mode', slideshowOnly)
+
+      return () => {
+        document.body.classList.remove('slideshow-only-mode')
+      }
+    }
+  }, [slideshowOnly])
+
+  useEffect(() => {
+    if (slideshowOnly) {
+      setError('')
+      return
+    }
+  }, [slideshowOnly])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === ' ') {
+        event.preventDefault()
+        setSlideshowOnly((prev) => !prev)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
@@ -483,13 +533,14 @@ function PhotoViewer() {
   }, [])
 
   const startFilmstripResize = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (slideshowOnly) return
     filmstripResizeActive.current = true
     filmstripResizeData.current = { startX: event.clientX, startWidth: filmstripWidth }
     document.body.classList.add('resizing-filmstrip')
   }
 
   const handleThumbnailEnter = (event: ReactMouseEvent<HTMLDivElement>, entry: HistoryEntry) => {
-    if (!viewerRef.current) return
+    if (!viewerRef.current || slideshowOnly) return
     const rect = event.currentTarget.getBoundingClientRect()
     const top = Math.max(24, rect.top)
     const generated = historyThumbnails[entry.id]
@@ -505,7 +556,7 @@ function PhotoViewer() {
       isLoading: !original
     })
 
-    if (!original && !historyOriginalRequests.current.has(entry.id)) {
+    if (!original && !historyOriginalRequests.current.has(entry.id) && !slideshowOnly) {
       historyOriginalRequests.current.add(entry.id)
 
       iCloudAPI
@@ -548,6 +599,7 @@ function PhotoViewer() {
   }
 
   const handleThumbnailLeave = () => {
+    if (slideshowOnly) return
     setHoverPreview(null)
   }
 
@@ -725,7 +777,7 @@ function PhotoViewer() {
         })
       )
     }
-  }, [removeHistoryEntry])
+  }, [removeHistoryEntry, slideshowOnly])
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -740,7 +792,7 @@ function PhotoViewer() {
     } finally {
       setThumbnailsLoading(false)
     }
-  }, [loadHistoryThumbnails])
+  }, [loadHistoryThumbnails, slideshowOnly])
 
   const viewHistoryImage = useCallback(async (entry: HistoryEntry, options?: { fromAutoCycle?: boolean }) => {
     const fromAutoCycle = options?.fromAutoCycle ?? false
@@ -778,6 +830,11 @@ function PhotoViewer() {
           setGeneratedImage(imageData.data)
         } catch (imgErr) {
           console.error('Failed to load history image:', imgErr)
+          if (slideshowOnly) {
+            removeHistoryEntry(entry.id)
+            return
+          }
+          setError('Failed to load generated image')
           removeHistoryEntry(entry.id)
           return
         }
@@ -805,7 +862,51 @@ function PhotoViewer() {
       console.error('Failed to load history entry:', err)
       setError('Failed to load history image')
     }
-  }, [historyOriginalPhotos, removeHistoryEntry])
+  }, [historyOriginalPhotos, removeHistoryEntry, slideshowOnly])
+
+  useEffect(() => {
+    if (history.length === 0) {
+      historyIdsRef.current = []
+      setUnseenQueue([])
+      setPriorityQueue([])
+      return
+    }
+
+    const historyIds = history.map((entry) => entry.id)
+    const prevHistoryIds = historyIdsRef.current
+    historyIdsRef.current = historyIds
+
+    const newIds = historyIds.filter((id) => !prevHistoryIds.includes(id) && id !== generatedId)
+
+    setUnseenQueue((prev) => {
+      const filtered = prev.filter((id) => historyIds.includes(id) && id !== generatedId)
+      const additions = historyIds.filter(
+        (id) => id !== generatedId && !filtered.includes(id) && !newIds.includes(id)
+      )
+      return [...filtered, ...newIds, ...additions]
+    })
+
+    if (newIds.length > 0) {
+      setPriorityQueue((prev) => {
+        const next = [...newIds, ...prev]
+        const unique: string[] = []
+        for (const id of next) {
+          if (id !== generatedId && !unique.includes(id)) {
+            unique.push(id)
+          }
+        }
+        return unique.slice(0, 3)
+      })
+    } else {
+      setPriorityQueue((prev) => prev.filter((id) => historyIds.includes(id) && id !== generatedId))
+    }
+  }, [history, generatedId])
+
+  useEffect(() => {
+    if (!generatedId) return
+    setUnseenQueue((prev) => prev.filter((id) => id !== generatedId))
+    setPriorityQueue((prev) => prev.filter((id) => id !== generatedId))
+  }, [generatedId])
 
   useEffect(() => {
     const clearTimer = () => {
@@ -822,17 +923,56 @@ function PhotoViewer() {
     }
 
     cycleTimerRef.current = window.setTimeout(() => {
-      const pool = history.filter((entry) => entry.id !== generatedId)
-      const candidates = pool.length > 0 ? pool : history
-      const nextEntry = candidates[Math.floor(Math.random() * candidates.length)]
+      const historyMap = new Map(history.map((entry) => [entry.id, entry]))
+      let nextId: string | undefined
+      let usedPriority = false
 
+      if (priorityQueue.length > 0) {
+        nextId = priorityQueue[0]
+        usedPriority = true
+      } else if (unseenQueue.length > 0) {
+        const index = Math.floor(Math.random() * unseenQueue.length)
+        nextId = unseenQueue[index]
+      } else {
+        const currentId = generatedIdRef.current
+        const fallbackIds = history.map((entry) => entry.id).filter((id) => id !== currentId)
+        if (fallbackIds.length === 0) return
+        nextId = fallbackIds[Math.floor(Math.random() * fallbackIds.length)]
+        const refill = fallbackIds.filter((id) => id !== nextId)
+        setUnseenQueue(refill)
+      }
+
+      if (!nextId) return
+
+      const selectedId = nextId
+
+      setPriorityQueue((prev) =>
+        prev.filter((id, idx) => {
+          if (id === selectedId) return false
+          if (usedPriority && idx === 0) return false
+          return true
+        })
+      )
+      setUnseenQueue((prev) => {
+        const filtered = prev.filter((id) => id !== selectedId)
+        if (filtered.length > 0) {
+          return filtered
+        }
+        const currentId = generatedIdRef.current
+        const refill = history
+          .map((entry) => entry.id)
+          .filter((id) => id !== selectedId && id !== currentId)
+        return refill
+      })
+
+      const nextEntry = historyMap.get(selectedId)
       if (nextEntry) {
         void viewHistoryImage(nextEntry, { fromAutoCycle: true })
       }
     }, slideshowSpeedMs)
 
     return clearTimer
-  }, [slideshowPlaying, history, generatedId, viewHistoryImage, slideshowSpeedMs])
+  }, [slideshowPlaying, history, generatedId, viewHistoryImage, slideshowSpeedMs, priorityQueue, unseenQueue])
 
   const pauseGeneration = () => {
     if (generationPausedRef.current) return
@@ -1014,7 +1154,11 @@ function PhotoViewer() {
 
   useEffect(() => {
     if (history.length > 0 && !generatedId) {
-      void viewHistoryImage(history[0], { fromAutoCycle: true })
+      const randomIndex = Math.floor(Math.random() * history.length)
+      const randomEntry = history[randomIndex]
+      if (randomEntry) {
+        void viewHistoryImage(randomEntry, { fromAutoCycle: true })
+      }
     }
   }, [history, generatedId, viewHistoryImage])
 
@@ -1025,23 +1169,25 @@ function PhotoViewer() {
 
   return (
     <div className="photo-viewer" ref={viewerRef}>
-      {error && (
+      {error && !slideshowOnly && (
         <div className="error-message">{error}</div>
       )}
 
-      <button
-        className="workflow-button"
-        onClick={() => {
-          setShowPromptInfo(false)
-          setShowWorkflowInfo(true)
-        }}
-        title="How the app works"
-        aria-label="Show workflow overview"
-      >
-        ℹ️
-      </button>
+      {slideshowOnly && (
+        <button
+          className="info-icon-button floating"
+          onClick={() => {
+            setShowPromptInfo(false)
+            setShowWorkflowInfo(true)
+          }}
+          title="How the app works"
+          aria-label="Show workflow overview"
+        >
+          <span className="info-icon">i</span>
+        </button>
+      )}
 
-      {showWorkflowInfo && (
+      {!slideshowOnly && showWorkflowInfo && (
         <div className="workflow-popup" role="dialog" aria-modal="true">
           <div className="workflow-content">
             <div className="workflow-header">
@@ -1081,7 +1227,7 @@ function PhotoViewer() {
         </div>
       )}
 
-      {showAdminDialog && (
+      {!slideshowOnly && showAdminDialog && (
         <div className="admin-modal" role="dialog" aria-modal="true">
           <div className="admin-modal-content">
             <div className="admin-modal-header">
@@ -1141,10 +1287,10 @@ function PhotoViewer() {
       )}
 
       {/* Filmstrip - left sidebar with history */}
-      {(history.length > 0 || thumbnailsLoading) && (
+      {!slideshowOnly && (history.length > 0 || thumbnailsLoading) && (
         <>
           <div className="filmstrip" style={{ width: filmstripWidth }}>
-            <h3 className="filmstrip-title">Recent</h3>
+            <h3 className="filmstrip-title">Gallery</h3>
             {thumbnailsLoading ? (
               <div className="filmstrip-loading" aria-live="polite">
                 <div className="spinner small"></div>
@@ -1180,12 +1326,12 @@ function PhotoViewer() {
             onMouseDown={startFilmstripResize}
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize recent thumbnails panel"
+            aria-label="Resize gallery thumbnails panel"
           ></div>
         </>
       )}
 
-      {hoverPreview && (
+      {!slideshowOnly && hoverPreview && (
         <div
           className="thumbnail-hover-preview"
           style={{ top: hoverPreview.top, left: filmstripWidth + 24 }}
@@ -1211,56 +1357,66 @@ function PhotoViewer() {
 
       <div className="main-content">
         {/* Main Image Display */}
-        <div className="image-container">
+        <div
+          className={`image-container ${slideshowOnly ? 'kiosk-mode' : ''}`}
+          onClick={() => {
+            if (!generatedImage || stage !== 'complete') return
+            if (!showOriginal) {
+              if (missingOriginal) {
+                return
+              }
+              setError('')
+              setShowOriginal(true)
+            } else {
+              setError('')
+              setShowOriginal(false)
+            }
+          }}
+          role={generatedImage ? 'button' : undefined}
+          tabIndex={generatedImage ? 0 : undefined}
+          onKeyDown={(event) => {
+            if (!generatedImage) return
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              if (!showOriginal) {
+                if (missingOriginal) {
+                  return
+                }
+                setError('')
+                setShowOriginal(true)
+              } else {
+                setError('')
+                setShowOriginal(false)
+              }
+            }
+          }}
+          aria-label={generatedImage ? (showOriginal ? 'Return to generated image' : 'Show original image') : undefined}
+        >
           {displayImage && (
             <img src={displayImage} alt="Photo" className="main-image" />
           )}
           
-          {/* Overlay spinner during processing */}
-          {stage && stage !== 'complete' && (
-            <div className="processing-overlay">
-              <div className="spinner"></div>
-              {stage === 'analyzing' && (
-                <p className="overlay-text">Analysing...</p>
-              )}
-              {stage === 'prompting' && (
-                <p className="overlay-text">Creating image prompt...</p>
-              )}
-              {stage === 'generating' && (
-                <p className="overlay-text">Generating new image...</p>
-              )}
-            </div>
-          )}
+          {/* Per-image overlay removed; footer now reflects background stages */}
 
           {/* Toggle button (always show when we have generated image) */}
-          {generatedImage && stage === 'complete' && (
-            <button 
-              className="toggle-button"
-              onClick={() => {
-                if (!showOriginal) {
-                  if (missingOriginal) {
-                    setError('Original photo unavailable for this entry')
-                    return
-                  }
-                  setError('')
-                  setShowOriginal(true)
-                } else {
-                  setError('')
-                  setShowOriginal(false)
-                }
-              }}
-              title={showOriginal ? 'Show generated' : 'Show original'}
-            >
-              {showOriginal ? '🎨' : '📸'}
-            </button>
-          )}
+          {/* Overlay removed; image click now handles toggle */}
 
         </div>
 
         {/* Analysis Panel - only show after analyzing is done */}
-         {analysis && (
+         {!slideshowOnly && analysis && (
            <aside className="analysis-panel" aria-live="polite">
-            <h3>Image Description</h3>
+            <div className="analysis-header">
+              <h3>Image Description</h3>
+              <button
+                className="info-icon-button"
+                onClick={() => setShowWorkflowInfo(true)}
+                title="How the app works"
+                aria-label="Show workflow overview"
+              >
+                <span className="info-icon">i</span>
+              </button>
+            </div>
             <div className="analysis-text" role="document">
               <p>{analysis.description}</p>
             </div>
@@ -1271,12 +1427,12 @@ function PhotoViewer() {
                   <h3>Image Prompt</h3>
                   {promptTemplate && (
                     <button
-                      className="prompt-info-button"
+                      className="info-icon-button"
                       onClick={() => setShowPromptInfo(true)}
                       title="View prompt template"
                       aria-label="View prompt template"
                     >
-                      ℹ️
+                      <span className="info-icon">i</span>
                     </button>
                   )}
                 </div>
@@ -1366,6 +1522,17 @@ function PhotoViewer() {
               </span>
             </>
           )}
+        </div>
+        <div className="footer-middle-controls">
+          <button
+            className={`kiosk-toggle-button ${slideshowOnly ? 'active' : ''}`}
+            onClick={() => setSlideshowOnly((prev) => !prev)}
+            title={slideshowOnly ? 'Show details' : 'Hide details'}
+            aria-pressed={slideshowOnly}
+            aria-label="Toggle details view"
+          >
+            {slideshowOnly ? 'Show Details' : 'Hide Details'}
+          </button>
         </div>
         <div className="footer-right-controls">
           <button

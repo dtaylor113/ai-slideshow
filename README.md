@@ -20,14 +20,15 @@ Then open `http://localhost:5173` in your browser!
 ## Current Status: Phase 4 - Hosted Family Slideshow ✅
 
 **What's Working:**
-- ✅ Auto-rotating gallery of curated AI artwork (latest 200 images ready instantly)
+- ✅ Auto-rotating gallery of curated AI artwork (randomized subset of up to 200 images ready instantly)
 - ✅ Context-aware style selection (Gemini analyzes each photo and chooses fitting art styles)
 - ✅ Seamless background processing (next image generates while you view current one)
-- ✅ History filmstrip showing the latest 200 generated images
+- ✅ Gallery filmstrip showing a randomized slice (up to 200 generated images)
 - ✅ Click any history thumbnail to revisit with full metadata
 - ✅ Hover preview shows generated art alongside the original photo
 - ✅ Slideshow playback controls (play/pause + 3–30s speed selector)
 - ✅ Admin-only image generation controls (settings gear → password `football`)
+- ✅ Slideshow-only kiosk mode (single toggle hides all controls)
 - ✅ Auto-pruning keeps history clean; filmstrip waits for thumbnails before displaying
 - ✅ Randomized gallery sample on each load (no two refreshes feel the same)
 - ✅ View original vs generated image toggle
@@ -61,9 +62,10 @@ Then open `http://localhost:5173` in your browser!
 - **Playback controls:** Play/pause toggle plus 3–30s speed selector (default 8 seconds)
 - **Auto-rotation:** Seamless transitions when next image is ready
 - **Adaptive pacing:** Natural flow based on generation time, or timed cycling when running through saved history only
-- **Filmstrip sidebar:** Scrollable view of the latest 200 generated images with thumbnails
+- **Filmstrip sidebar:** Scrollable view of up to 200 generated images sampled randomly per refresh
 - **Click to revisit:** View any past image with its analysis and prompt
 - **Admin start/stop:** Settings gear (password `football`) reveals generation controls when you want fresh AI renders
+- **Slideshow-only mode:** One toggle hides all controls for a distraction-free viewing experience
 - **Saved locally:** Generated images stored in `photos/generated/`
 
 ### 📊 UI/UX
@@ -71,16 +73,19 @@ Then open `http://localhost:5173` in your browser!
 - **Right panel:** Analysis text and image prompt displayed elegantly
 - **Background status:** Footer shows next image progress once admin enables generation
 - **Hover previews:** Thumbnail hover reveals generated art next to the source photo
-- **Toggle original:** Button to compare original photo vs generated artwork
+- **Click-to-toggle:** Tap the main image (or press space/enter) to compare original vs generated artwork
 - **Responsive:** Works on desktop and tablet
 
-## Hosted Mode Defaults
-- The slideshow starts in view-only mode, serving curated artwork from `photos/generated/` with no waiting.
-- A settings gear in the footer unlocks admin mode (password `football`) to start or stop new AI generations.
-- Playback controls let viewers pause/resume the slideshow and choose a speed between 3 and 30 seconds (default 8s).
-- History refreshes automatically every three minutes so all open browsers see the latest creations once generation is running.
-- Missing thumbnails/originals are pruned automatically; the filmstrip shows “Loading thumbnails…” until content is ready.
-- When the original photo is unavailable, the 🎨/📸 toggle shows a friendly notice instead of interrupting the slideshow.
+- **Slideshow-only as default:** The app loads in view-only mode (no controls), serving curated artwork from `photos/generated/` instantly.
+- **Show details toggle:** Bottom-center pill (and the spacebar) switch between full UI and kiosk view; the choice persists per browser session.
+- **Image click swap:** Click the main image to toggle between generated and original (if available).
+- **Shuffle without repeats:** Slideshow cycles through every image before repeating and gives priority to freshly generated art.
+- **Queue intelligence:** Newly generated artwork is surfaced within the next few slides before the queue reshuffles for another lap.
+- **Admin unlock:** Settings gear (password `football`) reveals generation controls when you want fresh AI renders.
+- **Playback controls:** Play/pause and 3–30 second speed selector (default 8s).
+- **Auto-refresh:** History refreshes every three minutes so all viewers see new art once generation restarts (refresh keeps the queue order unless new files arrive).
+- **Thumbnail spinner & pruning:** Filmstrip waits for “Loading thumbnails…” to resolve; missing files are pruned automatically.
+- **Friendly notices:** If the original photo is missing, the toggle click shows a gentle notification instead of an intrusive alert.
 
 ## Project Structure
 

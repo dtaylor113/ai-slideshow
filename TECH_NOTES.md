@@ -10,7 +10,7 @@
 
 ---
 
-## Current Architecture (Phase 3)
+## Current Architecture (Phase 4)
 
 ### AI-Powered Three-Tier Architecture
 
@@ -25,20 +25,21 @@
                                │  photos/            │
                                │  ├─ source images   │
                                │  └─ generated/      │
-                               │     (last 200)      │
+                               │     (curated set)   │
                                └─────────────────────┘
 ```
 
 **Data Flow:**
-1. Frontend requests random photo
-2. Backend selects from `photos/`
-3. **AI Pipeline:**
-   - Gemini 2.5 Flash analyzes image (vision)
-   - AI generates context-aware art style prompt
-   - Gemini 2.5 Flash Image ("Nano Banana") generates artwork
-4. Saves to `photos/generated/`
-5. Returns to frontend with metadata
-6. Background immediately starts processing next image
+1. Frontend loads curated history (random subset of up to 200 generated images)
+2. Hosted slideshow plays from this queue while image generation remains paused
+3. Admin unlock (password `football`) can resume foreground/background AI pipeline
+4. When generation is running:
+   - Gemini 2.5 Flash analyzes the selected source photo
+   - Prompt builder composes an art direction string
+   - Gemini 2.5 Flash Image ("Nano Banana") produces stylized artwork
+   - Image + metadata saved to `photos/generated/` and logged
+   - New art is surfaced near the top of the slideshow queue
+5. Gallery history refreshes every 3 minutes so viewers automatically see arrivals
 
 ---
 
@@ -182,24 +183,33 @@ ai-slideshow/
 
 **Key Data Structures:**
 ```python
-# In-memory history (last 200 generated images)
-generated_history = []
-MAX_HISTORY = 10
+MAX_HISTORY = int(os.environ.get("MAX_HISTORY", 200))
+generated_history: list[dict[str, Any]] = []  # in-memory mirror of disk log
 
-# Request/Response models
+class HistoryEntry(TypedDict, total=False):
+    id: str
+    filename: str
+    original_filename: str | None
+    prompt: str | None
+    description: str | None
+    timestamp: int | None
+    duration_ms: int | None
+
+# FastAPI request models keep pipeline strongly typed
 class AnalyzeRequest(BaseModel):
-    photo_data: str  # base64
+    photo_data: str
     filename: str
 
 class PromptRequest(BaseModel):
-    description: str  # from analyze
+    description: str
     filename: str
 
 class GenerateRequest(BaseModel):
-    photo_data: str  # base64
+    photo_data: str
     filename: str
-    description: str  # from analyze
-    prompt: str      # from prompt endpoint
+    description: str
+    prompt: str
+    prompt_template: str | None = None
 ```
 
 **AI Pipeline Implementation:**
@@ -353,6 +363,16 @@ toggleGeneration() {
 }
 ```
 
+### Gallery Randomization & Refresh Cadence
+
+| Layer | Behaviour |
+|-------|-----------|
+| **Backend history loader** | Each `/api/generated/history` call (and startup) scans `photos/generated/`, filters by image extensions, keeps the newest dozen files, fills the remainder with a random sample (defaults to 200), and shuffles the result before returning it. Metadata is hydrated from `generation-log-DO-NOT-DELETE.txt`; missing files are pruned via `prune_generated_history()` before responses. |
+| **Frontend fetch** | `fetchHistory()` runs immediately on mount and every `HISTORY_REFRESH_INTERVAL_MS` (3 minutes). While thumbnails load the filmstrip shows a "Loading thumbnails…" spinner. Any file that fails to load is dropped from both the frontend cache and the backend history via `removeHistoryEntry`. |
+| **Slideshow queue** | The React component maintains two arrays: `unseenQueue` (shuffled list of remaining IDs for the current lap) and `priorityQueue` (freshly generated IDs). Each timer tick pops from `priorityQueue` first so new art appears within the next 1–3 slides, then consumes a random entry from `unseenQueue`. When `unseenQueue` empties it refills with the current history order, guaranteeing every image appears once per cycle before repeats. |
+| **User persistence** | `slideshowOnly` state (details hidden or visible) is persisted in `localStorage`. Admin unlock state lives in component memory for the session. |
+| **Keyboard & click shortcuts** | Spacebar toggles details visibility. Clicking the hero image swaps between generated/original when the original asset exists. |
+
 ---
 
 ## UI/UX Design
@@ -363,14 +383,14 @@ toggleGeneration() {
 ┌─────────────────────────────────────────────────────────────┐
 │ ┌──────────┐ ┌────────────────────────┐ ┌────────────────┐ │
 │ │          │ │                        │ │   ANALYSIS     │ │
-│ │ Filmstrip│ │                        │ │                │ │
+│ │ Gallery  │ │                        │ │                │ │
 │ │          │ │   Main Image Display   │ │ Photo desc...  │ │
-│ │  Recent  │ │                        │ │                │ │
-│ │          │ │   [Toggle: 📸/🎨]      │ │ ─────────────  │ │
+│ │ (Random) │ │                        │ │                │ │
+│ │          │ │   [Tap to Toggle]     │ │ ─────────────  │ │
 │ │  🎨      │ │                        │ │ IMAGE PROMPT   │ │
 │ │  🎨      │ │                        │ │                │ │
 │ │  🎨      │ │                        │ │ "in the style  │ │
-│ │ (200)    │ │                        │ │  of..."        │ │
+│ │ (≤200)   │ │                        │ │  of..."        │ │
 │ │          │ │                        │ │                │ │
 │ └──────────┘ └────────────────────────┘ └────────────────┘ │
 │──────────────────────────────────────────────────────────────│
@@ -382,7 +402,7 @@ toggleGeneration() {
 **Key UI Elements:**
 
 1. **Filmstrip (Left, 100px)**
-   - Latest 200 generated images (random subset on each load)
+   - Randomized subset of up to 200 generated images per refresh
    - Thumbnail previews (actual images loaded)
    - Active item highlighted (blue border)
    - Vertical scroll if needed
@@ -390,17 +410,17 @@ toggleGeneration() {
 
 2. **Main Image (Center, flex: 1)**
    - Full-screen image display
-   - Toggle button (top-right): 📸 original / 🎨 generated
-   - Processing overlay (spinner + text) during generation
+   - Click (or press space/enter) to toggle generated vs original, if available
+   - No blocking overlays; status messaging lives in the footer
    - Background black (#000)
 
 3. **Analysis Panel (Right, 400px)**
    - "Analysis" section with description
    - Divider line
    - "Image Prompt" section with style
-   - "✅ Complete" when done
    - Scrollable if content is long
    - Dark background (#1a1a1a)
+   - Minimal info buttons styled as glass badges
 
 4. **Footer (Bottom, fixed)**
    - Play/pause toggle plus speed selector (3–30s, default 8s)
@@ -408,12 +428,17 @@ toggleGeneration() {
    - Status label reflects active stage once generation is enabled
    - Semi-transparent black overlay, minimal and discreet
 
-5. **Thumbnail hover preview**
+5. **Slideshow-Only Mode Toggle**
+   - Footer-centered pill (`Hide Details` / `Show Details`) or spacebar shortcut controls kiosk display
+   - Persists per browser session (localStorage) and adds `slideshow-only-mode` body class for styling
+   - When active, filmstrip, analysis panel, and footer controls hide while the floating workflow info badge remains accessible
+
+6. **Thumbnail hover preview**
    - Hovering a history item reveals generated art alongside the original photo
    - Lazy-loads originals only when requested to keep hover responsive
    - Spinner shown until the original is available; missing originals produce a gentle notification only when requested
 
-6. **Prompt Details Popup**
+7. **Prompt Details Popup**
    - Accessible from the "Image Prompt" tooltip button in the analysis panel.
    - Two evenly split, scrollable sections: **Image Prompt Template** (top) and **Image Generation Prompt** (bottom).
    - Displays the exact text sent to Gemini for both prompt construction and image generation, aiding transparency.
@@ -423,9 +448,9 @@ toggleGeneration() {
 
 - Slideshow loads with image generation paused so the hosted gallery appears instantly.
 - Footer settings gear unlocks admin mode with password `football`, persisted for the current browser session.
+- Slideshow-only mode hides the chrome; toggle sits in the footer (or press the spacebar) and persists per session.
 - When admin starts generation, the UI calls `fetchAndProcessPhoto()` to resume the pipeline and reveals status controls.
-- Every client polls `/api/generated/history` every 3 minutes, ensuring all viewers see fresh artwork once generation restarts.
-- The filmstrip displays a loading spinner until thumbnails are fetched; backend pruning removes missing generated files automatically.
+- Slideshow ordering is queue-based: each image appears once per cycle, with newly discovered generations bumped to the front of the queue.
 
 ### Color Scheme
 
@@ -486,9 +511,9 @@ try {
 **Seamless User Experience:**
 - Current image displays while next processes
 - Natural pacing driven by generation time while models run
-- When generation is paused, a 5-second timer cycles through the saved history
+- When generation is paused, the slideshow timer uses the visitor-selected interval (default 8s) to step through the queue
 - Instant swap when ready (no loading states)
-- Footer shows progress discreetly
+- Footer shows progress discreetly once admin enables generation
 
 ---
 
@@ -736,12 +761,7 @@ cp ~/Pictures/*.jpg photos/
 
 ---
 
-## Future Enhancements (Phase 4+)
-
-### GitHub Release & Deployment Prep (Phase 4)
-- Publish the codebase to GitHub (private repo is fine for now)
-- Document the curated `/photos` set and any licensing restrictions
-- Verify `.env` handling and deployment scripts work from a clean clone
+## Future Enhancements (Phase 5+)
 
 ### Public Hosting with Curated Library (Phase 5)
 - Railway.app or Fly.io
@@ -795,6 +815,6 @@ cp ~/Pictures/*.jpg photos/
 
 ---
 
-**Last Updated:** October 30, 2025  
-**Current Phase:** Phase 3 Complete ✅  
-**Next Phase:** GitHub Release & Deployment Prep (Phase 4)
+**Last Updated:** November 1, 2025  
+**Current Phase:** Phase 4 Complete ✅  
+**Next Phase:** Public Hosting (Phase 5)

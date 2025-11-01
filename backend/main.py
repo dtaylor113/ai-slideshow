@@ -322,7 +322,10 @@ def _parse_log_history() -> list[dict]:
     return entries
 
 
-def load_generated_history_from_disk(max_entries: int = MAX_HISTORY):
+def load_generated_history_from_disk(
+    max_entries: int = MAX_HISTORY,
+    prioritize_latest: int = 12,
+):
     global generated_history
 
     metadata_entries = _parse_log_history()
@@ -348,10 +351,28 @@ def load_generated_history_from_disk(max_entries: int = MAX_HISTORY):
             path for path in GENERATED_DIR.iterdir()
             if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
         ]
-        if len(all_generated) > max_entries:
-            generated_files = random.sample(all_generated, max_entries)
+
+        if not all_generated:
+            generated_files: list[Path] = []
         else:
-            generated_files = all_generated
+            # Always surface the newest files, then fill the remainder with a random sample.
+            all_generated.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+            priority_count = min(prioritize_latest, max_entries, len(all_generated))
+            priority_files = all_generated[:priority_count]
+
+            remaining_pool = all_generated[priority_count:]
+            remaining_needed = max_entries - len(priority_files)
+
+            if remaining_needed > 0:
+                if len(remaining_pool) > remaining_needed:
+                    random_files = random.sample(remaining_pool, remaining_needed)
+                else:
+                    random_files = remaining_pool
+            else:
+                random_files = []
+
+            random.shuffle(random_files)
+            generated_files = priority_files + random_files
 
         for path in generated_files:
             if len(loaded_entries) >= max_entries:
@@ -391,6 +412,9 @@ def load_generated_history_from_disk(max_entries: int = MAX_HISTORY):
             }
 
             loaded_entries.append(entry)
+
+    if loaded_entries:
+        random.shuffle(loaded_entries)
 
     generated_history = loaded_entries
     print(f"🗂️  Loaded {len(generated_history)} generated history entries from disk (cap {max_entries})")
@@ -874,6 +898,7 @@ async def generate_ai_image(request: GenerateRequest):
 
 @app.get("/api/generated/history")
 async def get_generated_history():
+    load_generated_history_from_disk()
     prune_generated_history()
     """Get list of recently generated images"""
     return {

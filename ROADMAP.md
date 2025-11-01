@@ -146,6 +146,8 @@ Deliver a hosted, view-only slideshow experience backed by curated generated art
 - [x] Expose slideshow playback controls (play/pause + 3–30s speed selector, default 8s).
 - [x] Track/deploy curated `photos/` + `photos/generated/` bundle so family sees finished art immediately.
 - [x] Auto-prune missing generated images and show a clean loading state for thumbnails.
+- [x] Randomize filmstrip + slideshow queue so viewers get fresh mixes and newly generated art appears within a few slides.
+- [x] Polish kiosk UX: glass info badges, footer toggle, keyboard shortcuts, and persistent slideshow-only preference.
 
 **Milestone:** Hosted URL shows an immediately-available slideshow; admin can selectively enable generation when desired.
 ---

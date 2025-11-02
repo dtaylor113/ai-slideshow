@@ -148,6 +148,7 @@ Deliver a hosted, view-only slideshow experience backed by curated generated art
 - [x] Auto-prune missing generated images and show a clean loading state for thumbnails.
 - [x] Randomize filmstrip + slideshow queue so viewers get fresh mixes and newly generated art appears within a few slides.
 - [x] Polish kiosk UX: glass info badges, footer toggle, keyboard shortcuts, and persistent slideshow-only preference.
+- [x] Add pin-to-original mode: pause slideshow, fetch every variation for the selected photo, then resume with the filtered gallery.
 
 **Milestone:** Hosted URL shows an immediately-available slideshow; admin can selectively enable generation when desired.
 ---
@@ -247,6 +248,7 @@ Better history management and user controls.
 - Context-aware prompts (Halloween → spooky, celebration → vibrant, etc.)
 - Hosted slideshow defaults to view-only mode; admin enables generation via password
 - Auto-pruning keeps history clean after manual file deletions; thumbnails only appear once loaded
+- Pin-to-original lets hosts review every generated variation for a photo with a single click (auto pauses and resumes slideshow)
 - Full metadata display
 - Original vs generated comparison
 - Automatic local storage management

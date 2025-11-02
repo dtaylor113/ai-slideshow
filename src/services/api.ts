@@ -83,6 +83,7 @@ export interface HistoryEntry {
 
 export interface HistoryResponse {
   history: HistoryEntry[]
+  pinned_original?: string | null
 }
 
 export const iCloudAPI = {
@@ -155,8 +156,10 @@ export const iCloudAPI = {
   },
 
   // Generated Images History
-  getGeneratedHistory: async (): Promise<HistoryResponse> => {
-    const response = await api.get('/api/generated/history')
+  getGeneratedHistory: async (original?: string): Promise<HistoryResponse> => {
+    const response = await api.get('/api/generated/history', {
+      params: original ? { original } : undefined,
+    })
     return response.data
   },
 

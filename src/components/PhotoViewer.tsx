@@ -431,6 +431,11 @@ function PhotoViewer() {
   const [historyOriginalPhotos, setHistoryOriginalPhotos] = useState<Record<string, Photo>>({})
   const [unseenQueue, setUnseenQueue] = useState<string[]>([])
   const [priorityQueue, setPriorityQueue] = useState<string[]>([])
+  const [currentOriginalFilename, setCurrentOriginalFilename] = useState<string | null>(null)
+  const [pinnedOriginal, setPinnedOriginal] = useState<string | null>(null)
+  const [pinnedTargetId, setPinnedTargetId] = useState<string | null>(null)
+  const [pinnedLoading, setPinnedLoading] = useState(false)
+  const pinnedPreviousSlideshow = useRef<boolean>(true)
   const [generationPaused, setGenerationPaused] = useState(true)
   const [slideshowPlaying, setSlideshowPlaying] = useState(true)
   const [slideshowSpeedMs, setSlideshowSpeedMs] = useState(DEFAULT_SLIDESHOW_INTERVAL_MS)
@@ -472,6 +477,16 @@ function PhotoViewer() {
   useEffect(() => {
     historyThumbnailsRef.current = historyThumbnails
   }, [historyThumbnails])
+ 
+  useEffect(() => {
+    setHistory([])
+    setHistoryThumbnails({})
+    historyThumbnailsRef.current = {}
+    setHistoryOriginalPhotos({})
+    setUnseenQueue([])
+    setPriorityQueue([])
+    historyIdsRef.current = []
+  }, [pinnedOriginal])
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -782,17 +797,89 @@ function PhotoViewer() {
   const fetchHistory = useCallback(async () => {
     try {
       setThumbnailsLoading(true)
-      const historyData = await iCloudAPI.getGeneratedHistory()
-      setHistory(historyData.history)
-      
+      if (pinnedOriginal) {
+        setPinnedLoading(true)
+      }
+      const historyData = await iCloudAPI.getGeneratedHistory(pinnedOriginal ?? undefined)
+ 
+       if (pinnedOriginal && historyData.history.length === 0) {
+         setError('No generated variations found for this photo yet')
+         setPinnedLoading(false)
+         setPinnedTargetId(null)
+         setPinnedOriginal(null)
+         return
+       }
+ 
+       setHistory(historyData.history)
+ 
+      if (pinnedOriginal && historyData.history.length > 0) {
+        const normalize = (value: string | null | undefined) => {
+          if (!value) return null
+          const parts = value.split(/[\\\/]/)
+          return parts[parts.length - 1]?.toLowerCase() ?? value.toLowerCase()
+        }
+
+        const targetOriginal = normalize(pinnedOriginal)
+        const targetEntry = historyData.history.find((entry) => entry.id === pinnedTargetId)
+          ?? historyData.history.find((entry) => normalize(entry.original_filename) === targetOriginal)
+          ?? historyData.history[0]
+
+        if (targetEntry) {
+          setGeneratedId(targetEntry.id)
+          setPinnedTargetId(targetEntry.id)
+          void viewHistoryImage(targetEntry, { fromAutoCycle: true })
+        }
+      }
+
       // Load thumbnails for all history items
       await loadHistoryThumbnails(historyData.history)
     } catch (err) {
       console.error('Failed to fetch history:', err)
     } finally {
+      if (pinnedOriginal) {
+        setPinnedLoading(false)
+      }
       setThumbnailsLoading(false)
     }
-  }, [loadHistoryThumbnails, slideshowOnly])
+  }, [loadHistoryThumbnails, pinnedOriginal, slideshowOnly])
+
+  const togglePinnedOriginal = useCallback(() => {
+    if (!currentOriginalFilename) {
+      return
+    }
+ 
+    setPinnedOriginal((prev) => {
+      if (prev && prev === currentOriginalFilename) {
+        setPinnedTargetId(null)
+        setSlideshowPlaying(pinnedPreviousSlideshow.current)
+        return null
+      }
+      pinnedPreviousSlideshow.current = slideshowPlaying
+      setPinnedTargetId(generatedId)
+      setSlideshowPlaying(false)
+      if (cycleTimerRef.current !== null) {
+        window.clearTimeout(cycleTimerRef.current)
+        cycleTimerRef.current = null
+      }
+      return currentOriginalFilename
+    })
+  }, [currentOriginalFilename, generatedId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    void fetchHistory()
+
+    const intervalId = window.setInterval(() => {
+      void fetchHistory()
+    }, HISTORY_REFRESH_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [fetchHistory])
 
   const viewHistoryImage = useCallback(async (entry: HistoryEntry, options?: { fromAutoCycle?: boolean }) => {
     const fromAutoCycle = options?.fromAutoCycle ?? false
@@ -819,6 +906,7 @@ function PhotoViewer() {
       setStage('complete')
       setShowOriginal(false)
       setMissingOriginal(false)
+      setCurrentOriginalFilename(entry.original_filename || null)
 
       // Display cached generated image instantly if available
       if (historyThumbnailsRef.current[entry.id]) {
@@ -1066,7 +1154,7 @@ function PhotoViewer() {
       setBackgroundStage('generating')
       const generationPromptText = buildGenerationPrompt(analysisResult.description, promptResult.art_prompt)
       const generateResult = await iCloudAPI.generateImage(
-        photo, 
+        photo,
         analysisResult.description,
         promptResult.art_prompt,
         promptResult.prompt_template,
@@ -1088,7 +1176,7 @@ function PhotoViewer() {
         generatedImage: generateResult.generated_image,
         id: generateResult.id
       }
-      
+
       setHistoryOriginalPhotos((prev) => (prev[generateResult.id] ? prev : { ...prev, [generateResult.id]: photo }))
 
       await fetchHistory()
@@ -1131,40 +1219,27 @@ function PhotoViewer() {
     }
   }, [stage, generationPaused])
 
-  const fetchHistoryRef = useRef(fetchHistory)
-
   useEffect(() => {
-    fetchHistoryRef.current = fetchHistory
-  }, [fetchHistory])
-
-  // Fetch history on mount
-  useEffect(() => {
-    fetchHistory()
-  }, [fetchHistory])
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      fetchHistoryRef.current()
-    }, HISTORY_REFRESH_INTERVAL_MS)
-
-    return () => {
-      window.clearInterval(intervalId)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (history.length > 0 && !generatedId) {
+    if (history.length > 0 && !generatedId && !pinnedOriginal) {
       const randomIndex = Math.floor(Math.random() * history.length)
       const randomEntry = history[randomIndex]
       if (randomEntry) {
         void viewHistoryImage(randomEntry, { fromAutoCycle: true })
       }
     }
-  }, [history, generatedId, viewHistoryImage])
+  }, [history, generatedId, pinnedOriginal, viewHistoryImage])
+
+  useEffect(() => {
+    if (pinnedOriginal && !pinnedLoading && history.length > 0) {
+      setSlideshowPlaying(true)
+    }
+  }, [pinnedOriginal, pinnedLoading, history.length])
+
+  const isCurrentPinned = Boolean(pinnedOriginal && currentOriginalFilename && pinnedOriginal === currentOriginalFilename)
 
   // Determine which image to show
-  const displayImage = showOriginal 
-    ? currentPhoto?.data 
+  const displayImage = showOriginal
+    ? currentPhoto?.data
     : (generatedImage || currentPhoto?.data)
 
   return (
@@ -1199,29 +1274,17 @@ function PhotoViewer() {
               >
                 ✕
               </button>
-      </div>
+            </div>
             <ol className="workflow-steps">
-              <li>
-                On startup a random local image is selected.
-              </li>
-              <li>
-                The image is resized to a thumbnail and sent to Google Gemini 2.5 Flash for a quick 2–3 sentence description of the image.
-              </li>
-              <li>
-                The description is sent to the same Gemini 2.5 Flash model which returns a single dramatic style idea as the image prompt.
-              </li>
-              <li>
-                The original photo plus the image prompt is then sent to Gemini 2.5 Flash Image ("Nano Banana") which generates the final stylized image.
-              </li>
-              <li>
-                The generated image, analysis, and prompts display immediately while the next photo begins processing in the background.
-              </li>
-              <li>
-                Clicking a history thumbnail reuses its saved analysis and prompts while new images keep processing in the background.
-              </li>
+              <li>On startup a random local image is selected.</li>
+              <li>The image is resized and analysed with Google Gemini 2.5 Flash.</li>
+              <li>The description feeds a prompt that selects a fitting art style.</li>
+              <li>Gemini 2.5 Flash Image ("Nano Banana") generates the final artwork.</li>
+              <li>The generated piece, analysis, and prompts display immediately while the next photo starts processing in the background.</li>
+              <li>Clicking a history thumbnail replays its saved prompts while background generation continues.</li>
             </ol>
             <p className="workflow-note">
-              Background processing keeps one finished image ready to swap in so the slideshow feels continuous even while models are working.
+              Background processing keeps one finished image ready so the slideshow feels continuous even while models are working.
             </p>
           </div>
         </div>
@@ -1290,7 +1353,7 @@ function PhotoViewer() {
       {!slideshowOnly && (history.length > 0 || thumbnailsLoading) && (
         <>
           <div className="filmstrip" style={{ width: filmstripWidth }}>
-            <h3 className="filmstrip-title">Gallery</h3>
+            <h3 className="filmstrip-title">{pinnedOriginal ? 'Variations' : 'Gallery'}</h3>
             {thumbnailsLoading ? (
               <div className="filmstrip-loading" aria-live="polite">
                 <div className="spinner small"></div>
@@ -1326,7 +1389,7 @@ function PhotoViewer() {
             onMouseDown={startFilmstripResize}
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize gallery thumbnails panel"
+            aria-label={pinnedOriginal ? 'Resize variations thumbnails panel' : 'Resize gallery thumbnails panel'}
           ></div>
         </>
       )}
@@ -1392,14 +1455,35 @@ function PhotoViewer() {
           }}
           aria-label={generatedImage ? (showOriginal ? 'Return to generated image' : 'Show original image') : undefined}
         >
+          {currentOriginalFilename && (
+            <button
+              type="button"
+              className={`pin-toggle-button ${isCurrentPinned ? 'pinned' : ''}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                togglePinnedOriginal()
+              }}
+              title={isCurrentPinned ? 'Show all images' : 'Show only variations of this photo'}
+              aria-label={isCurrentPinned ? 'Unpin original photo' : 'Pin this original photo'}
+              aria-pressed={isCurrentPinned}
+            >
+              {isCurrentPinned ? '📌' : '📍'}
+            </button>
+          )}
+
+          {pinnedOriginal && (
+             <div className={`pin-status-badge ${isCurrentPinned ? 'active' : ''}`} aria-live="polite">
+              {pinnedLoading ? 'Getting variations of this image…' : 'Showing all variations of this image'}
+            </div>
+          )}
+
           {displayImage && (
             <img src={displayImage} alt="Photo" className="main-image" />
           )}
           
           {/* Per-image overlay removed; footer now reflects background stages */}
 
-          {/* Toggle button (always show when we have generated image) */}
-          {/* Overlay removed; image click now handles toggle */}
+          {/* Toggle button removed; image click handles compare */}
 
         </div>
 

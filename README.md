@@ -74,6 +74,7 @@ Then open `http://localhost:5173` in your browser!
 - **Background status:** Footer shows next image progress once admin enables generation
 - **Hover previews:** Thumbnail hover reveals generated art next to the source photo
 - **Click-to-toggle:** Tap the main image (or press space/enter) to compare original vs generated artwork
+- **Pin to original:** Tap the pin icon on the hero image to fetch every generated variation for that photo. The slideshow pauses while we load them, shows “Getting variations of this image…”, then resumes once the full set is ready; tap again to unpin and return to the randomized gallery.
 - **Responsive:** Works on desktop and tablet
 
 - **Slideshow-only as default:** The app loads in view-only mode (no controls), serving curated artwork from `photos/generated/` instantly.
@@ -173,7 +174,7 @@ cp ~/Pictures/vacation/*.jpg photos/
 | `/api/analyze` | POST | Analyze image with Gemini Vision |
 | `/api/prompt` | POST | Generate art style prompt from analysis |
 | `/api/generate` | POST | Generate styled image with Nano Banana |
-| `/api/generated/history` | GET | Get last 200 generated images metadata |
+| `/api/generated/history` | GET | Get the randomized gallery (last 200) or, when called with `?original=<filename>`, every generated variation of that source photo |
 | `/api/generated/{filename}` | GET | Serve a specific generated image |
 
 ## Tech Stack

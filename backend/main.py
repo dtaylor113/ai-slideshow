@@ -323,8 +323,8 @@ def _parse_log_history() -> list[dict]:
 
 
 def load_generated_history_from_disk(
-    max_entries: int = MAX_HISTORY,
     prioritize_latest: int = 12,
+    original_filter: Optional[str] = None,
 ):
     global generated_history
 
@@ -346,36 +346,81 @@ def load_generated_history_from_disk(
 
     loaded_entries: list[dict] = []
 
+    target_stem = Path(original_filter).stem.lower() if original_filter else None
+    target_candidates = set()
+    if original_filter:
+        lowered = original_filter.lower()
+        target_candidates.add(lowered)
+        target_candidates.add(Path(lowered).name)
+        target_candidates.add(Path(lowered).stem)
+        if target_stem:
+            target_candidates.add(target_stem)
+
     if GENERATED_DIR.exists():
         all_generated = [
             path for path in GENERATED_DIR.iterdir()
             if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
         ]
 
+        if target_stem:
+            filtered: list[Path] = []
+            for path in all_generated:
+                filename = path.name
+                # Try to derive the original basename from the file naming convention
+                guess_stem = None
+                parts = filename.split('_', 2)
+                if len(parts) == 3:
+                    guess_full = parts[2]
+                    guess_lower = guess_full.lower()
+                    guess_name = Path(guess_lower).name
+                    guess_stem = Path(guess_lower).stem
+                    candidate_names = {guess_lower, guess_name, guess_stem}
+                else:
+                    candidate_names = set()
+
+                meta = metadata_by_generated.get(filename)
+                meta_stem = None
+                if meta:
+                    meta_original = meta.get('original_filename') or ''
+                    if meta_original:
+                        meta_lower = meta_original.lower()
+                        meta_name = Path(meta_lower).name
+                        meta_stem = Path(meta_lower).stem
+                        candidate_names.update({meta_lower, meta_name, meta_stem})
+
+                if candidate_names.intersection(target_candidates):
+                    filtered.append(path)
+
+            all_generated = filtered
+
         if not all_generated:
             generated_files: list[Path] = []
         else:
             # Always surface the newest files, then fill the remainder with a random sample.
             all_generated.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-            priority_count = min(prioritize_latest, max_entries, len(all_generated))
-            priority_files = all_generated[:priority_count]
 
-            remaining_pool = all_generated[priority_count:]
-            remaining_needed = max_entries - len(priority_files)
-
-            if remaining_needed > 0:
-                if len(remaining_pool) > remaining_needed:
-                    random_files = random.sample(remaining_pool, remaining_needed)
-                else:
-                    random_files = remaining_pool
+            if original_filter:
+                generated_files = all_generated  # return entire filtered set
             else:
-                random_files = []
+                priority_count = min(prioritize_latest, MAX_HISTORY, len(all_generated))
+                priority_files = all_generated[:priority_count]
 
-            random.shuffle(random_files)
-            generated_files = priority_files + random_files
+                remaining_pool = all_generated[priority_count:]
+                remaining_needed = MAX_HISTORY - len(priority_files)
+
+                if remaining_needed > 0:
+                    if len(remaining_pool) > remaining_needed:
+                        random_files = random.sample(remaining_pool, remaining_needed)
+                    else:
+                        random_files = remaining_pool
+                else:
+                    random_files = []
+
+                random.shuffle(random_files)
+                generated_files = priority_files + random_files
 
         for path in generated_files:
-            if len(loaded_entries) >= max_entries:
+            if len(loaded_entries) >= MAX_HISTORY:
                 break
 
             filename = path.name
@@ -414,10 +459,13 @@ def load_generated_history_from_disk(
             loaded_entries.append(entry)
 
     if loaded_entries:
-        random.shuffle(loaded_entries)
+        if original_filter:
+            loaded_entries.sort(key=lambda entry: entry.get("timestamp") or 0, reverse=True)
+        else:
+            random.shuffle(loaded_entries)
 
     generated_history = loaded_entries
-    print(f"🗂️  Loaded {len(generated_history)} generated history entries from disk (cap {max_entries})")
+    print(f"🗂️  Loaded {len(generated_history)} generated history entries from disk (cap {MAX_HISTORY})")
 
 
 # Load any existing history when the server process starts
@@ -897,12 +945,13 @@ async def generate_ai_image(request: GenerateRequest):
 
 
 @app.get("/api/generated/history")
-async def get_generated_history():
-    load_generated_history_from_disk()
+async def get_generated_history(original: Optional[str] = None):
+    load_generated_history_from_disk(original_filter=original)
     prune_generated_history()
     """Get list of recently generated images"""
     return {
-        "history": generated_history
+        "history": generated_history,
+        "pinned_original": original
     }
 
 

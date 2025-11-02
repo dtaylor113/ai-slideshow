@@ -178,7 +178,7 @@ ai-slideshow/
 | `POST /api/analyze` | POST | Gemini vision analysis |
 | `POST /api/prompt` | POST | AI-generated art style prompt |
 | `POST /api/generate` | POST | Generate styled image |
-| `GET /api/generated/history` | GET | Last 200 generated images |
+| `GET /api/generated/history` | GET | Randomized gallery (≤200). Use `?original=<filename>` to retrieve all generated variations for a specific source image |
 | `GET /api/generated/{filename}` | GET | Serve specific generated image |
 
 **Key Data Structures:**
@@ -367,8 +367,9 @@ toggleGeneration() {
 
 | Layer | Behaviour |
 |-------|-----------|
-| **Backend history loader** | Each `/api/generated/history` call (and startup) scans `photos/generated/`, filters by image extensions, keeps the newest dozen files, fills the remainder with a random sample (defaults to 200), and shuffles the result before returning it. Metadata is hydrated from `generation-log-DO-NOT-DELETE.txt`; missing files are pruned via `prune_generated_history()` before responses. |
+| **Backend history loader** | Each `/api/generated/history` call (and startup) scans `photos/generated/`, filters by image extensions, keeps the newest dozen files, fills the remainder with a random sample (defaults to 200), and shuffles the result before returning it. When the optional `original` query parameter is supplied the loader returns **all** generated variations for that source image (sorted newest-first). Metadata is hydrated from `generation-log-DO-NOT-DELETE.txt`; missing files are pruned via `prune_generated_history()` before responses. |
 | **Frontend fetch** | `fetchHistory()` runs immediately on mount and every `HISTORY_REFRESH_INTERVAL_MS` (3 minutes). While thumbnails load the filmstrip shows a "Loading thumbnails…" spinner. Any file that fails to load is dropped from both the frontend cache and the backend history via `removeHistoryEntry`. |
+| **Pinned original filter** | Tapping the pin icon on the hero image pauses the slideshow, surfaces a "Getting variations of this image…" badge, and calls `/api/generated/history?original=<filename>` to retrieve every generated variation for that source photo. The queues reset with those entries, the pinned image remains selected, and the slideshow resumes automatically once thumbnails finish loading. Unpinning restores the randomized gallery. |
 | **Slideshow queue** | The React component maintains two arrays: `unseenQueue` (shuffled list of remaining IDs for the current lap) and `priorityQueue` (freshly generated IDs). Each timer tick pops from `priorityQueue` first so new art appears within the next 1–3 slides, then consumes a random entry from `unseenQueue`. When `unseenQueue` empties it refills with the current history order, guaranteeing every image appears once per cycle before repeats. |
 | **User persistence** | `slideshowOnly` state (details hidden or visible) is persisted in `localStorage`. Admin unlock state lives in component memory for the session. |
 | **Keyboard & click shortcuts** | Spacebar toggles details visibility. Clicking the hero image swaps between generated/original when the original asset exists. |
@@ -583,8 +584,16 @@ POST /api/generate
 
 **History:**
 ```typescript
+// Randomized gallery
 GET /api/generated/history
 → {
+    history: [ /* up to 200 shuffled entries */ ]
+}
+
+// All variations for a single original image
+GET /api/generated/history?original=IMG_1234.jpg
+→ {
+    pinned_original: "IMG_1234.jpg",
     history: [
       {
         id: "1704394834120",
@@ -595,8 +604,8 @@ GET /api/generated/history
         timestamp: 1704394834120,
         generation_time: "18.42s"
       },
-      // ... up to 10 entries
-  ]
+      // ... every generated variation for that original image
+    ]
 }
 ```
 

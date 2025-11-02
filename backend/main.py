@@ -564,10 +564,34 @@ async def get_random_photo():
             detail=f"No photos found in {PHOTOS_DIR}. Add some photos to get started!"
         )
     
-    # Pick random photo - INSTANT!
-    random_photo = random.choice(photos)
+    # Weight selection towards the most recently added photos so new uploads generate sooner.
+    now = time.time()
+    weighted_photos: list[tuple[Path, float]] = []
+
+    for photo in photos:
+        try:
+            mtime = photo.stat().st_mtime
+        except OSError:
+            continue
+
+        age_hours = max(1.0, (now - mtime) / 3600.0)
+        # Recent photos (< 24h) get ~95% weight, older photos taper off gradually.
+        weight = max(0.05, 1.0 / age_hours)
+        weighted_photos.append((photo, weight))
+
+    if not weighted_photos:
+        random_photo = random.choice(photos)
+        weight_used = None
+    else:
+        population, weights = zip(*weighted_photos)
+        random_photo = random.choices(population, weights=weights, k=1)[0]
+        weight_used = weights[population.index(random_photo)]
     
-    print(f"🎲 Selected: {random_photo.name}")
+    if weight_used is not None:
+        hours_old = (now - random_photo.stat().st_mtime) / 3600.0
+        print(f"🎯 Weighted selection: {random_photo.name} (age ~{hours_old:.1f}h)")
+    else:
+        print(f"🎲 Selected: {random_photo.name}")
     
     try:
         # Read photo file

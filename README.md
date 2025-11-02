@@ -60,7 +60,7 @@ Then open `http://localhost:5173` in your browser!
 ### 🎬 Slideshow & History
 - **View-only by default:** Hosted build loads with a pre-generated gallery so family can watch immediately
 - **Playback controls:** Play/pause toggle plus 3–30s speed selector (default 8 seconds)
-- **Auto-rotation:** Seamless transitions when next image is ready
+- **Auto-rotation:** Seamless transitions when next image is ready (newly added originals are prioritized for generation so fresh uploads appear quickly)
 - **Adaptive pacing:** Natural flow based on generation time, or timed cycling when running through saved history only
 - **Filmstrip sidebar:** Scrollable view of up to 200 generated images sampled randomly per refresh
 - **Click to revisit:** View any past image with its analysis and prompt

@@ -1455,7 +1455,7 @@ function PhotoViewer() {
           }}
           aria-label={generatedImage ? (showOriginal ? 'Return to generated image' : 'Show original image') : undefined}
         >
-          {currentOriginalFilename && (
+          {currentOriginalFilename && !slideshowOnly && (
             <button
               type="button"
               className={`pin-toggle-button ${isCurrentPinned ? 'pinned' : ''}`}
@@ -1471,7 +1471,7 @@ function PhotoViewer() {
             </button>
           )}
 
-          {pinnedOriginal && (
+          {pinnedOriginal && !slideshowOnly && (
              <div className={`pin-status-badge ${isCurrentPinned ? 'active' : ''}`} aria-live="polite">
               {pinnedLoading ? 'Getting variations of this image…' : 'Showing all variations of this image'}
             </div>

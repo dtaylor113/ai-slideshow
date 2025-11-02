@@ -174,7 +174,7 @@ ai-slideshow/
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `GET /` | GET | Health check, photo count |
-| `GET /api/photos/random` | GET | Random photo from collection |
+| `GET /api/photos/random` | GET | Weighted random photo (recent originals have higher probability) |
 | `POST /api/analyze` | POST | Gemini vision analysis |
 | `POST /api/prompt` | POST | AI-generated art style prompt |
 | `POST /api/generate` | POST | Generate styled image |
